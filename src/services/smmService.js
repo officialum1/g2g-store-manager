@@ -1,13 +1,24 @@
 const axios = require("axios");
 const { config } = require("../config");
 
-const httpClient = axios.create({
-  baseURL: config.smm.baseUrl,
-  timeout: 30_000,
-  headers: {
-    "Content-Type": "application/x-www-form-urlencoded"
-  }
-});
+function buildManualRequiredResponse() {
+  return {
+    status: "manual_required",
+    message: "No SMM panel configured"
+  };
+}
+
+function getCurrentSmmConfig() {
+  return {
+    baseUrl: String(config.smm.baseUrl || process.env.SMM_PANEL_URL || "").trim(),
+    apiKey: String(config.smm.apiKey || process.env.SMM_PANEL_KEY || "").trim()
+  };
+}
+
+function isSmmConfigured() {
+  const currentConfig = getCurrentSmmConfig();
+  return currentConfig.baseUrl !== "" && currentConfig.apiKey !== "";
+}
 
 function sleep(milliseconds) {
   return new Promise((resolve) => {
@@ -33,8 +44,13 @@ function formatAxiosError(error, action) {
 }
 
 async function postForm(action, payload) {
+  if (!isSmmConfigured()) {
+    return buildManualRequiredResponse();
+  }
+
+  const currentConfig = getCurrentSmmConfig();
   const form = new URLSearchParams();
-  form.set("key", config.smm.apiKey);
+  form.set("key", currentConfig.apiKey);
   form.set("action", action);
 
   Object.entries(payload).forEach(([key, value]) => {
@@ -44,7 +60,12 @@ async function postForm(action, payload) {
   });
 
   try {
-    const response = await httpClient.post("", form.toString());
+    const response = await axios.post(currentConfig.baseUrl, form.toString(), {
+      timeout: 30_000,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      }
+    });
     return response.data;
   } catch (error) {
     throw new Error(formatAxiosError(error, `SMM action ${action}`));
@@ -58,6 +79,10 @@ async function placeOrder(serviceId, link, quantity) {
       link,
       quantity
     });
+
+    if (response?.status === "manual_required") {
+      return response;
+    }
 
     const orderId = response.order || response.id || response.order_id;
 
@@ -75,6 +100,10 @@ async function placeOrder(serviceId, link, quantity) {
 
 async function getOrderStatus(smmOrderId) {
   try {
+    if (smmOrderId?.status === "manual_required") {
+      return smmOrderId;
+    }
+
     return await postForm("status", {
       order: smmOrderId
     });
@@ -95,8 +124,17 @@ function normalizeStatus(statusResponse) {
 }
 
 async function pollOrderUntilComplete(smmOrderId) {
+  if (smmOrderId?.status === "manual_required") {
+    return smmOrderId;
+  }
+
   for (let pollAttempt = 1; pollAttempt <= 20; pollAttempt += 1) {
     const statusResponse = await getOrderStatus(smmOrderId);
+
+    if (statusResponse?.status === "manual_required") {
+      return statusResponse;
+    }
+
     const normalizedStatus = normalizeStatus(statusResponse);
 
     if (["completed", "complete", "partial"].includes(normalizedStatus)) {
@@ -124,6 +162,8 @@ async function pollOrderUntilComplete(smmOrderId) {
 }
 
 module.exports = {
+  buildManualRequiredResponse,
+  isSmmConfigured,
   placeOrder,
   getOrderStatus,
   pollOrderUntilComplete

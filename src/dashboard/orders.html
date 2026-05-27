@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Orders Dashboard | G2G Store Manager</title>
     <link rel="stylesheet" href="/dashboard/css/style.css" />
+    <style>
+      .status-badge.manual_pending {
+        background: rgba(249, 115, 22, 0.18);
+        color: #fb923c;
+      }
+    </style>
   </head>
   <body data-page="orders">
     <div class="dashboard-shell">
@@ -127,5 +133,86 @@
       })();
     </script>
     <script src="/dashboard/js/orders.js"></script>
+    <script>
+      function getOrderStatusLabel(order) {
+        if (order.dashboard_status === "manual_pending") {
+          return "Manual Required";
+        }
+
+        return capitalize(order.dashboard_status);
+      }
+
+      buildRow = function (order) {
+        var retryDisabled = order.dashboard_status !== "failed" ? "disabled" : "";
+
+        return `
+          <tr>
+            <td>${order.order_id || "—"}</td>
+            <td>${capitalize(order.offer_type || "unknown")}</td>
+            <td>${order.buyer_id || "—"}</td>
+            <td>
+              <span class="status-badge ${order.dashboard_status}">
+                ${getOrderStatusLabel(order)}
+              </span>
+            </td>
+            <td>${Number.parseInt(order.purchased_qty || 0, 10)}</td>
+            <td>${Number.parseInt(order.delivered_qty || 0, 10)}</td>
+            <td>${formatDate(order.created_at)}</td>
+            <td>
+              <div class="button-row">
+                <button
+                  class="button-secondary retry-button"
+                  data-order-id="${order.order_id}"
+                  ${retryDisabled}
+                >
+                  Retry Delivery
+                </button>
+                <button
+                  class="button complete-button"
+                  data-order-id="${order.order_id}"
+                >
+                  Mark as Delivered
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      };
+
+      async function completeOrderDelivery(orderId, button) {
+        button.disabled = true;
+
+        try {
+          await fetchJson(`/api/orders/${encodeURIComponent(orderId)}/complete`, {
+            method: "POST"
+          });
+          showToast("success", `Order ${orderId} marked as delivered.`);
+          await loadOrders();
+        } catch (error) {
+          showToast("error", error.message);
+          button.disabled = false;
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", function () {
+        var tableBody = document.getElementById("orders-table-body");
+
+        tableBody.addEventListener("click", function (event) {
+          var button = event.target.closest(".complete-button");
+
+          if (!button || button.disabled) {
+            return;
+          }
+
+          var orderId = button.dataset.orderId;
+
+          if (!orderId) {
+            return;
+          }
+
+          void completeOrderDelivery(orderId, button);
+        });
+      });
+    </script>
   </body>
 </html>

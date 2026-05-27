@@ -4,6 +4,7 @@ const { query, withTransaction } = require("../db");
 const Order = require("../db/models/Order");
 const Delivery = require("../db/models/Delivery");
 const { enqueueDeliveryJob } = require("../jobs/deliveryQueue");
+const { postDelivery } = require("../services/g2gClient");
 
 const dashboardApp = express();
 const dashboardDirectory = path.join(__dirname, "..", "dashboard");
@@ -12,8 +13,11 @@ function normalizeDashboardStatus(order) {
   const orderStatus = String(order.status || "").toLowerCase();
   const deliveryStatus = String(order.latest_delivery_status || "").toLowerCase();
 
-  if (deliveryStatus.includes("fail") || orderStatus.includes("fail")) {
-    return "failed";
+  if (
+    orderStatus.includes("manual_pending") ||
+    deliveryStatus.includes("manual_required")
+  ) {
+    return "manual_pending";
   }
 
   if (
@@ -27,6 +31,10 @@ function normalizeDashboardStatus(order) {
     )
   ) {
     return "completed";
+  }
+
+  if (deliveryStatus.includes("fail") || orderStatus.includes("fail")) {
+    return "failed";
   }
 
   if (
@@ -211,6 +219,60 @@ function registerParentRoutes(parentApp) {
         success: true,
         job_id: job.id,
         order_id: orderId
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  ordersApiRouter.post("/:id/complete", async (req, res, next) => {
+    try {
+      const orderId = req.params.id;
+      const order = await Order.findByOrderId(orderId);
+
+      if (!order) {
+        return res.status(404).json({
+          error: "Order not found."
+        });
+      }
+
+      const manualDeliveryPayload = ["Delivered manually"];
+      const latestDelivery = await getLatestDelivery(orderId);
+      const rawPayload =
+        order.raw_payload && typeof order.raw_payload === "object"
+          ? order.raw_payload
+          : {};
+
+      await postDelivery(orderId, manualDeliveryPayload);
+
+      await Delivery.updateStatus(
+        latestDelivery?.delivery_id || `manual-${orderId}`,
+        orderId,
+        "delivered",
+        {
+          attempts: latestDelivery?.attempts ?? 0,
+          codes_delivered: manualDeliveryPayload
+        }
+      );
+
+      const deliveredQty =
+        Number.parseInt(order.purchased_qty ?? 0, 10) > 0
+          ? Number.parseInt(order.purchased_qty, 10)
+          : 1;
+
+      const updatedOrder = await Order.updateStatus(orderId, "delivered", {
+        delivered_qty: deliveredQty,
+        raw_payload: {
+          ...rawPayload,
+          manual_delivery: true,
+          manual_delivery_message: manualDeliveryPayload[0]
+        }
+      });
+
+      return res.json({
+        success: true,
+        order_id: orderId,
+        data: updatedOrder
       });
     } catch (error) {
       return next(error);
