@@ -2,6 +2,7 @@ services:
   - type: web
     name: g2g-store-manager
     env: node
+    plan: free
     buildCommand: npm install
     startCommand: node scripts/migrate.js && node src/index.js
     envVars:
@@ -27,13 +28,14 @@ services:
       - key: SMM_PANEL_KEY
         sync: false
       - key: PORT
-        value: 3000
+        value: "3000"
+
+  - type: redis
+    name: g2g-redis
+    plan: free
+    ipAllowList: []
 
 databases:
   - name: g2g-db
     databaseName: g2g_store
-    plan: free
-
-  - name: g2g-redis
-    type: redis
     plan: free
