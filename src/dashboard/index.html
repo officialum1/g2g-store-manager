@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>G2G Store Manager Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/css/style.css" />
+  </head>
+  <body data-page="orders">
+    <div class="dashboard-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">G2G</div>
+          <div class="brand-copy">
+            <h1>Store Manager</h1>
+            <p>Seller operations dashboard</p>
+          </div>
+        </div>
+
+        <nav class="nav-links">
+          <a class="nav-link" data-nav="orders" href="/dashboard/orders">Orders</a>
+          <a class="nav-link" data-nav="inventory" href="/dashboard/inventory">Inventory</a>
+          <a class="nav-link" data-nav="settings" href="/dashboard/settings">Settings</a>
+        </nav>
+
+        <div class="status-panel">
+          <p>Server Status</p>
+          <div class="server-status">
+            <span id="server-status-dot" class="status-dot"></span>
+            <span id="server-status-label">Checking health...</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="page-header">
+          <div>
+            <h2>Orders Overview</h2>
+            <p>Track delivery progress, failures, and retries in one place.</p>
+          </div>
+          <div class="header-actions">
+            <button id="refresh-orders-button" class="button-secondary">Refresh Now</button>
+            <span id="orders-last-refresh" class="last-updated">Waiting for first refresh...</span>
+          </div>
+        </header>
+
+        <section class="grid-cards">
+          <article class="card">
+            <p class="card-label">Total Orders</p>
+            <p id="summary-total" class="card-value">0</p>
+            <p class="card-caption">All tracked orders</p>
+          </article>
+          <article class="card">
+            <p class="card-label">Pending</p>
+            <p id="summary-pending" class="card-value">0</p>
+            <p class="card-caption">Awaiting delivery work</p>
+          </article>
+          <article class="card">
+            <p class="card-label">Delivered Today</p>
+            <p id="summary-delivered" class="card-value">0</p>
+            <p class="card-caption">Successful deliveries today</p>
+          </article>
+          <article class="card">
+            <p class="card-label">Failed</p>
+            <p id="summary-failed" class="card-value">0</p>
+            <p class="card-caption">Ready for manual retry</p>
+          </article>
+        </section>
+
+        <section class="table-card">
+          <div class="table-header">
+            <div>
+              <h3>Order Queue</h3>
+              <p>Auto-refreshes every 30 seconds.</p>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order ID</th>
+                  <th>Offer Type</th>
+                  <th>Buyer ID</th>
+                  <th>Status</th>
+                  <th>Qty</th>
+                  <th>Delivered</th>
+                  <th>Created At</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="orders-table-body"></tbody>
+            </table>
+          </div>
+
+          <div id="orders-empty" class="empty-state" hidden>
+            No orders available yet.
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script>
+      (function () {
+        var currentPage = document.body.dataset.page;
+        document.querySelectorAll("[data-nav]").forEach(function (link) {
+          if (link.dataset.nav === currentPage) {
+            link.classList.add("active");
+          }
+        });
+
+        fetch("/health")
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("Health check failed");
+            }
+
+            document.getElementById("server-status-dot").classList.add("online");
+            document.getElementById("server-status-label").textContent = "Online";
+          })
+          .catch(function () {
+            document.getElementById("server-status-dot").classList.add("offline");
+            document.getElementById("server-status-label").textContent = "Offline";
+          });
+      })();
+    </script>
+    <script src="/dashboard/js/orders.js"></script>
+  </body>
+</html>

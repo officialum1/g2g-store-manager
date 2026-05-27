@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: g2g-store-manager
+    env: node
+    buildCommand: npm install
+    startCommand: node scripts/migrate.js && node src/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: g2g-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: g2g-redis
+          type: redis
+          property: connectionString
+      - key: G2G_API_KEY
+        sync: false
+      - key: G2G_API_SECRET
+        sync: false
+      - key: G2G_WEBHOOK_SECRET
+        sync: false
+      - key: SMM_PANEL_URL
+        sync: false
+      - key: SMM_PANEL_KEY
+        sync: false
+      - key: PORT
+        value: 3000
+
+databases:
+  - name: g2g-db
+    databaseName: g2g_store
+    plan: free
+
+  - name: g2g-redis
+    type: redis
+    plan: free

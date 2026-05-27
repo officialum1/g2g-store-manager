@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Settings Dashboard | G2G Store Manager</title>
+    <link rel="stylesheet" href="/dashboard/css/style.css" />
+  </head>
+  <body data-page="settings">
+    <div class="dashboard-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">G2G</div>
+          <div class="brand-copy">
+            <h1>Store Manager</h1>
+            <p>Seller operations dashboard</p>
+          </div>
+        </div>
+
+        <nav class="nav-links">
+          <a class="nav-link" data-nav="orders" href="/dashboard/orders">Orders</a>
+          <a class="nav-link" data-nav="inventory" href="/dashboard/inventory">Inventory</a>
+          <a class="nav-link" data-nav="settings" href="/dashboard/settings">Settings</a>
+        </nav>
+
+        <div class="status-panel">
+          <p>Server Status</p>
+          <div class="server-status">
+            <span id="server-status-dot" class="status-dot"></span>
+            <span id="server-status-label">Checking health...</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="page-header">
+          <div>
+            <h2>Settings</h2>
+            <p>Manage G2G credentials, webhook secrets, and SMM panel access.</p>
+          </div>
+        </header>
+
+        <section class="section-card" style="margin-bottom: 24px;">
+          <div class="section-header">
+            <div>
+              <h3>G2G API Credentials</h3>
+              <p>Saved only when you click this section's button.</p>
+            </div>
+            <button class="button" data-save-section="g2g">Save G2G Credentials</button>
+          </div>
+
+          <div class="field-grid two-up">
+            <div class="field-group">
+              <label for="g2g-api-key">G2G API Key</label>
+              <div class="password-wrap">
+                <input
+                  id="g2g-api-key"
+                  data-setting-key="G2G_API_KEY"
+                  data-secret="true"
+                  type="password"
+                  placeholder=""
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  class="toggle-visibility"
+                  data-toggle-target="g2g-api-key"
+                >
+                  Show
+                </button>
+              </div>
+            </div>
+            <div class="field-group">
+              <label for="g2g-api-secret">G2G API Secret</label>
+              <div class="password-wrap">
+                <input
+                  id="g2g-api-secret"
+                  data-setting-key="G2G_API_SECRET"
+                  data-secret="true"
+                  type="password"
+                  placeholder=""
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  class="toggle-visibility"
+                  data-toggle-target="g2g-api-secret"
+                >
+                  Show
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section-card" style="margin-bottom: 24px;">
+          <div class="section-header">
+            <div>
+              <h3>Webhook Secrets</h3>
+              <p>Use separate secrets if G2G provides different event credentials.</p>
+            </div>
+            <button class="button" data-save-section="webhook">Save Webhook Secrets</button>
+          </div>
+
+          <div class="field-grid">
+            <div class="field-group">
+              <label for="order-webhook-secret">
+                Order Webhook Secret (G2G_WEBHOOK_SECRET for order.api_delivery events)
+              </label>
+              <div class="password-wrap">
+                <input
+                  id="order-webhook-secret"
+                  data-setting-key="G2G_WEBHOOK_SECRET"
+                  data-secret="true"
+                  type="password"
+                  placeholder=""
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  class="toggle-visibility"
+                  data-toggle-target="order-webhook-secret"
+                >
+                  Show
+                </button>
+              </div>
+            </div>
+            <div class="field-group">
+              <label for="offer-webhook-secret">
+                Offer Webhook Secret (separate secret if G2G uses different secret per event type)
+              </label>
+              <div class="password-wrap">
+                <input
+                  id="offer-webhook-secret"
+                  data-setting-key="G2G_OFFER_WEBHOOK_SECRET"
+                  data-secret="true"
+                  type="password"
+                  placeholder=""
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  class="toggle-visibility"
+                  data-toggle-target="offer-webhook-secret"
+                >
+                  Show
+                </button>
+              </div>
+            </div>
+            <div class="field-group">
+              <label for="webhook-url-display">Webhook URL</label>
+              <input
+                id="webhook-url-display"
+                type="text"
+                value="https://yourdomain.com/webhook/g2g"
+                readonly
+              />
+            </div>
+          </div>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
+              <h3>SMM Panel</h3>
+              <p>Update panel access without restarting the service.</p>
+            </div>
+            <button class="button" data-save-section="smm">Save SMM Settings</button>
+          </div>
+
+          <div class="field-grid two-up">
+            <div class="field-group">
+              <label for="smm-panel-url">SMM Panel URL</label>
+              <input
+                id="smm-panel-url"
+                data-setting-key="SMM_PANEL_URL"
+                type="text"
+                placeholder="https://your-smm-panel.example/api/v2"
+                autocomplete="off"
+              />
+            </div>
+            <div class="field-group">
+              <label for="smm-panel-key">SMM Panel API Key</label>
+              <div class="password-wrap">
+                <input
+                  id="smm-panel-key"
+                  data-setting-key="SMM_PANEL_KEY"
+                  data-secret="true"
+                  type="password"
+                  placeholder=""
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  class="toggle-visibility"
+                  data-toggle-target="smm-panel-key"
+                >
+                  Show
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script>
+      (function () {
+        var currentPage = document.body.dataset.page;
+        document.querySelectorAll("[data-nav]").forEach(function (link) {
+          if (link.dataset.nav === currentPage) {
+            link.classList.add("active");
+          }
+        });
+
+        fetch("/health")
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("Health check failed");
+            }
+
+            document.getElementById("server-status-dot").classList.add("online");
+            document.getElementById("server-status-label").textContent = "Online";
+          })
+          .catch(function () {
+            document.getElementById("server-status-dot").classList.add("offline");
+            document.getElementById("server-status-label").textContent = "Offline";
+          });
+      })();
+    </script>
+    <script src="/dashboard/js/settings.js"></script>
+  </body>
+</html>

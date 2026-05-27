@@ -1,0 +1,20 @@
+{
+  "name": "g2g-store-manager",
+  "version": "1.0.0",
+  "description": "G2G Seller Store Automation System using Node.js, Express, PostgreSQL, Redis, BullMQ, and node-cron.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.9.0",
+    "bullmq": "^5.34.10",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "ioredis": "^5.4.1",
+    "node-cron": "^3.0.3",
+    "pg": "^8.13.1"
+  }
+}

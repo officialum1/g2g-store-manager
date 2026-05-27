@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Inventory Dashboard | G2G Store Manager</title>
+    <link rel="stylesheet" href="/dashboard/css/style.css" />
+  </head>
+  <body data-page="inventory">
+    <div class="dashboard-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">G2G</div>
+          <div class="brand-copy">
+            <h1>Store Manager</h1>
+            <p>Seller operations dashboard</p>
+          </div>
+        </div>
+
+        <nav class="nav-links">
+          <a class="nav-link" data-nav="orders" href="/dashboard/orders">Orders</a>
+          <a class="nav-link" data-nav="inventory" href="/dashboard/inventory">Inventory</a>
+          <a class="nav-link" data-nav="settings" href="/dashboard/settings">Settings</a>
+        </nav>
+
+        <div class="status-panel">
+          <p>Server Status</p>
+          <div class="server-status">
+            <span id="server-status-dot" class="status-dot"></span>
+            <span id="server-status-label">Checking health...</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="page-header">
+          <div>
+            <h2>Inventory Management</h2>
+            <p>Track account stock, filter offers, and quarantine defective items.</p>
+          </div>
+          <div class="header-actions">
+            <button id="open-add-items-modal" class="button">Add Items</button>
+            <span id="inventory-last-refresh" class="last-updated">Waiting for first refresh...</span>
+          </div>
+        </header>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
+              <h3>Available Stock Per Offer</h3>
+              <p>Live stock counts for account inventory.</p>
+            </div>
+          </div>
+
+          <div id="inventory-counts" class="badge-list"></div>
+        </section>
+
+        <section class="table-card" style="margin-top: 24px;">
+          <div class="table-header">
+            <div>
+              <h3>Inventory Table</h3>
+              <p>Filter by offer and status.</p>
+            </div>
+          </div>
+
+          <div class="filter-row">
+            <div class="field-group">
+              <label for="filter-offer-id">Offer ID</label>
+              <input id="filter-offer-id" type="text" placeholder="Filter by offer ID" />
+            </div>
+            <div class="field-group">
+              <label for="filter-status">Status</label>
+              <select id="filter-status">
+                <option value="">All statuses</option>
+                <option value="available">available</option>
+                <option value="delivered">delivered</option>
+                <option value="defective">defective</option>
+              </select>
+            </div>
+            <button id="apply-inventory-filter" class="button-secondary">Apply Filters</button>
+            <button id="reset-inventory-filter" class="button-secondary">Reset</button>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Item ID</th>
+                  <th>Offer ID</th>
+                  <th>Content</th>
+                  <th>Status</th>
+                  <th>Delivered To</th>
+                  <th>Created At</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="inventory-table-body"></tbody>
+            </table>
+          </div>
+
+          <div id="inventory-empty" class="empty-state" hidden>
+            No inventory rows match the current filter.
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="add-items-modal" class="modal" aria-hidden="true">
+      <div class="modal-card">
+        <h3>Add Inventory Items</h3>
+        <p>Paste one account or credential line per row.</p>
+        <div class="field-grid">
+          <div class="field-group">
+            <label for="bulk-offer-id">Offer ID</label>
+            <input id="bulk-offer-id" type="text" placeholder="Offer ID" />
+          </div>
+          <div class="field-group">
+            <label for="bulk-items">Items</label>
+            <textarea
+              id="bulk-items"
+              placeholder="username:password&#10;username2:password2"
+            ></textarea>
+          </div>
+        </div>
+        <div class="button-row" style="margin-top: 18px;">
+          <button id="save-bulk-items" class="button">Save Items</button>
+          <button id="close-add-items-modal" class="button-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script>
+      (function () {
+        var currentPage = document.body.dataset.page;
+        document.querySelectorAll("[data-nav]").forEach(function (link) {
+          if (link.dataset.nav === currentPage) {
+            link.classList.add("active");
+          }
+        });
+
+        fetch("/health")
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("Health check failed");
+            }
+
+            document.getElementById("server-status-dot").classList.add("online");
+            document.getElementById("server-status-label").textContent = "Online";
+          })
+          .catch(function () {
+            document.getElementById("server-status-dot").classList.add("offline");
+            document.getElementById("server-status-label").textContent = "Offline";
+          });
+      })();
+    </script>
+    <script src="/dashboard/js/inventory.js"></script>
+  </body>
+</html>
