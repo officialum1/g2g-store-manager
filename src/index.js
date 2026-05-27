@@ -4,7 +4,9 @@ const { closeDatabase, initializeDatabase } = require("./db");
 const { startDeliveryWorker } = require("./jobs/deliveryQueue");
 const { startOrderPoller } = require("./jobs/orderPoller");
 const deliveryRouter = require("./routes/delivery");
+const dashboardRouter = require("./routes/dashboard");
 const ordersRouter = require("./routes/orders");
+const settingsRouter = require("./routes/settings");
 const webhookRouter = require("./routes/webhook");
 
 const app = express();
@@ -12,6 +14,9 @@ const app = express();
 app.disable("x-powered-by");
 app.use("/webhook", webhookRouter);
 app.use(express.json({ limit: "1mb" }));
+app.get("/", (req, res) => res.redirect("/dashboard/orders"));
+app.use("/dashboard", dashboardRouter);
+app.use("/api/settings", settingsRouter);
 app.use("/orders", ordersRouter);
 app.use("/delivery", deliveryRouter);
 
