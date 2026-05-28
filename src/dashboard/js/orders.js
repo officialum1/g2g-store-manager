@@ -327,6 +327,10 @@ function buildRow(order) {
           <button class="button complete-button" data-order-id="${escapeHtml(orderId)}">
             Mark Delivered
           </button>
+          <button onclick="forceDeliver('${escapeHtml(orderId)}')" 
+            style="background:#ff6b35; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; margin-top:4px; display:block; width:100%;">
+            Force Deliver G2G
+          </button>
           <button class="button-secondary retry-button" data-order-id="${escapeHtml(orderId)}" ${retryDisabled}>
             Retry Delivery
           </button>
@@ -648,6 +652,41 @@ async function confirmDelivery() {
   }
 }
 
+async function forceDeliver(orderId) {
+  if (!confirm(`Force deliver order ${orderId} to G2G?`)) return;
+
+  const notes = prompt("Enter delivery note (optional):", "100,000 TikTok Views Delivered");
+
+  try {
+    showToast("success", "Attempting G2G delivery...");
+    const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}/force-deliver`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: notes || "Delivered" })
+    });
+    const data = await res.json();
+    const results = Array.isArray(data.results) ? data.results : [];
+
+    const successes = results.filter((result) => {
+      return result.status === 200 || result.status === 201;
+    });
+    const failures = results.filter((result) => {
+      return result.status !== 200 && result.status !== 201;
+    });
+
+    if (successes.length > 0) {
+      showToast("success", `Success! Method: ${successes[0].method}`);
+      alert("SUCCESS!\n\n" + JSON.stringify(successes[0], null, 2));
+      void loadOrders();
+    } else {
+      showToast("error", "All methods failed - check popup");
+      alert("ALL FAILED:\n\n" + JSON.stringify(results.length ? results : data, null, 2));
+    }
+  } catch (err) {
+    showToast("error", "Error: " + err.message);
+  }
+}
+
 function bindFilters() {
   ["order-search", "status-filter", "date-filter"].forEach((id) => {
     const input = document.getElementById(id);
@@ -753,3 +792,4 @@ document.addEventListener("DOMContentLoaded", () => {
 
 window.confirmDelivery = confirmDelivery;
 window.closeModal = closeModal;
+window.forceDeliver = forceDeliver;
