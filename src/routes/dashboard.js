@@ -1,4 +1,5 @@
 const express = require("express");
+const axios = require("axios");
 const path = require("path");
 const { query, withTransaction } = require("../db");
 const Order = require("../db/models/Order");
@@ -8,6 +9,8 @@ const g2gClient = require("../services/g2gClient");
 
 const dashboardApp = express();
 const dashboardDirectory = path.join(__dirname, "..", "dashboard");
+const G2G_BASE_URL = "https://open-api.g2g.com";
+const G2G_API_VERSION = "v2";
 
 function normalizeDashboardStatus(order) {
   const orderStatus = String(order.status || "").toLowerCase();
@@ -180,6 +183,18 @@ function getNestedValue(source, paths) {
   return null;
 }
 
+function parseRawPayload(rawPayload) {
+  if (typeof rawPayload === "string") {
+    try {
+      return JSON.parse(rawPayload);
+    } catch (error) {
+      return {};
+    }
+  }
+
+  return rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+}
+
 function normalizeG2GOrderPayload(order) {
   const orderId = getNestedValue(order, [
     "order_id",
@@ -239,11 +254,10 @@ function normalizeG2GOrderPayload(order) {
 }
 
 function getDeliveryIdFromOrder(order, latestDelivery) {
-  const rawPayload =
-    order.raw_payload && typeof order.raw_payload === "object"
-      ? order.raw_payload
-      : {};
+  const rawPayload = parseRawPayload(order.raw_payload);
   const deliveryList =
+    order.deliveries ||
+    order.delivery_list ||
     rawPayload.delivery_list ||
     rawPayload.deliveries ||
     rawPayload.payload?.delivery_list ||
@@ -254,8 +268,12 @@ function getDeliveryIdFromOrder(order, latestDelivery) {
   return (
     latestDelivery?.delivery_id ||
     order.delivery_id ||
+    order.deliveryId ||
+    order.fetched_delivery_id ||
+    order.delivery_summary?.delivery_id ||
     rawPayload.delivery_id ||
     rawPayload.deliveryId ||
+    rawPayload.fetched_delivery_id ||
     rawPayload.payload?.delivery_id ||
     rawPayload.delivery_summary?.delivery_id ||
     rawPayload.payload?.delivery_summary?.delivery_id ||
@@ -339,28 +357,54 @@ function registerParentRoutes(parentApp) {
         });
       }
 
+      let deliveryId =
+        order?.delivery_summary?.delivery_id ||
+        order?.delivery_id ||
+        order?.deliveries?.[0]?.delivery_id ||
+        order?.delivery_list?.[0]?.delivery_id ||
+        null;
+
+      if (!deliveryId) {
+        try {
+          const deliveriesPath = `/${G2G_API_VERSION}/order/${normalizedOrder.order_id}/deliveries`;
+          const dRes = await axios.get(G2G_BASE_URL + deliveriesPath, {
+            headers: g2gClient.buildHeaders(deliveriesPath)
+          });
+          console.log(
+            "[G2G] deliveries response:",
+            JSON.stringify(dRes.data).slice(0, 500)
+          );
+          const deliveries =
+            dRes.data?.payload?.delivery_list ||
+            dRes.data?.payload?.deliveries ||
+            [];
+
+          if (deliveries.length > 0) {
+            deliveryId = deliveries[0].delivery_id;
+            order.fetched_delivery_id = deliveryId;
+            order.delivery_list = deliveries;
+          }
+        } catch (dErr) {
+          console.log("[G2G] deliveries fetch skipped:", dErr.response?.status);
+        }
+      }
+
       const result = await query(
         `
           INSERT INTO orders (
             order_id,
             offer_id,
             buyer_id,
-            offer_type,
             status,
             purchased_qty,
             delivered_qty,
             raw_payload,
-            created_at,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
           ON CONFLICT (order_id)
           DO UPDATE SET
-            offer_id = EXCLUDED.offer_id,
-            buyer_id = EXCLUDED.buyer_id,
-            offer_type = EXCLUDED.offer_type,
             status = EXCLUDED.status,
-            purchased_qty = EXCLUDED.purchased_qty,
             delivered_qty = EXCLUDED.delivered_qty,
             raw_payload = EXCLUDED.raw_payload,
             updated_at = NOW()
@@ -370,8 +414,7 @@ function registerParentRoutes(parentApp) {
           normalizedOrder.order_id,
           normalizedOrder.offer_id,
           normalizedOrder.buyer_id,
-          normalizedOrder.offer_type,
-          normalizedOrder.status,
+          normalizedOrder.status || "pending",
           Number.isNaN(normalizedOrder.purchased_qty)
             ? 1
             : normalizedOrder.purchased_qty,
@@ -382,11 +425,16 @@ function registerParentRoutes(parentApp) {
         ]
       );
 
-      const savedOrder = buildDashboardOrder(result.rows[0]);
+      const savedOrder = buildDashboardOrder({
+        ...result.rows[0],
+        delivery_id: deliveryId
+      });
 
       return res.json({
         success: true,
         order,
+        deliveryId,
+        raw: order,
         data: savedOrder
       });
     } catch (err) {
@@ -425,6 +473,29 @@ function registerParentRoutes(parentApp) {
       return res.json(counts);
     } catch (error) {
       return next(error);
+    }
+  });
+
+  ordersApiRouter.get("/:orderId/raw", async (req, res) => {
+    try {
+      const result = await query(
+        "SELECT raw_payload FROM orders WHERE order_id = $1",
+        [req.params.orderId]
+      );
+
+      if (!result.rows[0]) {
+        return res.status(404).json({
+          error: "Not found"
+        });
+      }
+
+      return res.json({
+        raw: result.rows[0].raw_payload
+      });
+    } catch (err) {
+      return res.status(500).json({
+        error: err.message
+      });
     }
   });
 

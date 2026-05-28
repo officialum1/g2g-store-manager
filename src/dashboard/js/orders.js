@@ -70,8 +70,20 @@ function capitalize(value) {
 }
 
 function getRawPayload(order) {
-  if (order.raw_payload && typeof order.raw_payload === "object") {
-    return order.raw_payload.payload || order.raw_payload;
+  let raw = order.raw_payload;
+
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch (error) {
+      raw = {};
+    }
+  }
+
+  raw = raw || {};
+
+  if (raw && typeof raw === "object") {
+    return raw.payload || raw;
   }
 
   return order.payload || order;
@@ -109,24 +121,61 @@ function getNestedValue(source, paths) {
   return null;
 }
 
-function getAdditionalInfoList(order) {
-  const raw = getRawPayload(order);
-  const candidates = [
-    raw.delivery_summary?.additional_info_list,
-    raw.delivery_summary?.delivery_method_list,
-    raw.additional_info_list,
-    raw.delivery_method_list,
-    raw.delivery?.additional_info_list,
-    raw.delivery?.delivery_method_list
-  ];
+function extractDeliveryId(order) {
+  if (order.delivery_id) {
+    return order.delivery_id;
+  }
 
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate;
+  let raw = order.raw_payload;
+
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch (error) {
+      raw = {};
     }
   }
 
-  return [];
+  raw = raw || {};
+
+  return (
+    raw.delivery_summary?.delivery_id ||
+    raw.delivery_id ||
+    raw.deliveries?.[0]?.delivery_id ||
+    raw.delivery_list?.[0]?.delivery_id ||
+    raw.payload?.delivery_summary?.delivery_id ||
+    raw.payload?.delivery_id ||
+    raw.payload?.deliveries?.[0]?.delivery_id ||
+    raw.payload?.delivery_list?.[0]?.delivery_id ||
+    order.deliveryId ||
+    order.fetched_delivery_id ||
+    raw.fetched_delivery_id ||
+    null
+  );
+}
+
+function extractAdditionalInfo(order) {
+  let raw = order.raw_payload;
+
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch (error) {
+      raw = {};
+    }
+  }
+
+  return (
+    raw?.delivery_summary?.additional_info_list ||
+    raw?.additional_info_list ||
+    raw?.payload?.delivery_summary?.additional_info_list ||
+    raw?.payload?.additional_info_list ||
+    []
+  );
+}
+
+function getAdditionalInfoList(order) {
+  return extractAdditionalInfo(order);
 }
 
 function getAdditionalInfoLabel(item, index) {
@@ -152,29 +201,7 @@ function getAdditionalInfoValue(item) {
 }
 
 function getDeliveryId(order) {
-  const raw = getRawPayload(order);
-  const deliveryList =
-    raw.delivery_list ||
-    raw.deliveries ||
-    raw.payload?.delivery_list ||
-    raw.payload?.deliveries ||
-    [];
-  const firstDelivery = Array.isArray(deliveryList) ? deliveryList[0] : null;
-
-  return (
-    order.latest_delivery_id ||
-    order.delivery_id ||
-    raw.delivery_id ||
-    raw.deliveryId ||
-    raw.delivery_summary?.delivery_id ||
-    raw.delivery_summary?.id ||
-    raw.delivery?.delivery_id ||
-    raw.delivery?.id ||
-    firstDelivery?.delivery_id ||
-    firstDelivery?.id ||
-    firstDelivery?.delivery_summary?.delivery_id ||
-    ""
-  );
+  return extractDeliveryId(order) || "";
 }
 
 function getOrderAgeDate(order) {
@@ -408,7 +435,11 @@ async function lookupOrder(button) {
 
   try {
     const payload = await fetchJson(`/api/orders/lookup/${encodeURIComponent(orderId)}`);
-    const order = payload.data || payload.order;
+    const order = {
+      ...(payload.data || payload.order || {}),
+      delivery_id: payload.deliveryId || payload.data?.delivery_id,
+      raw_payload: payload.raw || payload.data?.raw_payload || payload.order
+    };
 
     if (!order || !order.order_id) {
       throw new Error("Lookup succeeded but no order data was returned.");
