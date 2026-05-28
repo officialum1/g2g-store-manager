@@ -176,72 +176,129 @@ router.post("/api/orders/:id/set-delivery-id", async (req, res, next) => {
   }
 });
 
-router.post("/api/orders/:id/deliver-g2g", async (req, res, next) => {
+router.post("/api/orders/:id/deliver-g2g", async (req, res) => {
+  const db = require("../../db");
+  const axios = require("axios");
+  const { buildHeaders } = require("../../services/g2gClient");
+  const BASE = "https://open-api.g2g.com";
+
   try {
-    const order = await SmmOrder.findById(req.params.id);
+    const result = await db.query("SELECT * FROM smm_orders WHERE id=$1", [req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: "Order not found" });
 
-    if (!order) {
-      return res.status(404).json({
-        error: "SMM order not found."
-      });
-    }
-
-    if (order.status !== "completed") {
-      return res.status(400).json({
-        error: "Only completed SMM orders can be delivered to G2G."
-      });
-    }
-
-    let deliveryId = order.g2g_delivery_id || null;
-
-    if (!deliveryId) {
-      const deliveryPayload = await g2gClient.getDeliveries(order.g2g_order_id);
-      deliveryId = getDeliveryIdFromPayload(deliveryPayload);
-    }
-
-    if (!deliveryId) {
-      return res.status(400).json({
-        error: "G2G delivery ID not found. Enter it manually and try again."
-      });
-    }
-
-    let g2gResponse;
+    const smmOrder = result.rows[0];
+    const orderId = smmOrder.g2g_order_id;
+    const notes = smmOrder.notes || "Order delivered successfully";
+    const results = [];
 
     try {
-      g2gResponse = await g2gClient.patchDelivery(
-        order.g2g_order_id,
-        deliveryId,
-        "delivered"
-      );
-    } catch (patchError) {
-      g2gResponse = await g2gClient.deliverCode(order.g2g_order_id, deliveryId, [
-        buildG2GProof(order)
-      ]);
+      const p = `/v2/orders/${orderId}/deliveries`;
+      const r = await axios.get(BASE + p, { headers: buildHeaders(p) });
+      const list = r.data?.payload?.delivery_list || r.data?.payload?.deliveries || [];
+      for (const d of list) {
+        const did = d.delivery_id || d.id;
+        if (did) {
+          try {
+            const pp = `/v2/orders/${orderId}/delivery/${did}`;
+            const pr = await axios.patch(
+              BASE + pp,
+              { status: "delivered" },
+              { headers: buildHeaders(pp) }
+            );
+            results.push({ method: "PATCH_delivery", delivery_id: did, status: pr.status, success: true });
+          } catch (e) {
+            results.push({
+              method: "PATCH_delivery",
+              delivery_id: did,
+              status: e.response?.status,
+              success: false,
+              error: e.response?.data
+            });
+          }
+        }
+      }
+    } catch (e) {
+      results.push({ method: "GET_deliveries", status: e.response?.status, success: false });
     }
 
-    const updated = await SmmOrder.markG2GDelivered(order.id);
+    if (smmOrder.g2g_delivery_id) {
+      try {
+        const p = `/v2/orders/${orderId}/delivery/${smmOrder.g2g_delivery_id}`;
+        const r = await axios.patch(BASE + p, { status: "delivered" }, { headers: buildHeaders(p) });
+        results.push({
+          method: "PATCH_manual_delivery_id",
+          delivery_id: smmOrder.g2g_delivery_id,
+          status: r.status,
+          success: true,
+          data: r.data
+        });
+      } catch (e) {
+        results.push({
+          method: "PATCH_manual_delivery_id",
+          delivery_id: smmOrder.g2g_delivery_id,
+          status: e.response?.status,
+          success: false,
+          error: e.response?.data
+        });
+      }
+    }
 
-    await query(
-      `
-        UPDATE orders
-        SET status = 'delivered',
-            delivered_qty = CASE
-              WHEN purchased_qty > 0 THEN purchased_qty
-              ELSE delivered_qty
-            END,
-            updated_at = NOW()
-        WHERE order_id = $1
-      `,
-      [order.g2g_order_id]
-    );
+    try {
+      const p = `/v2/orders/${orderId}/complete`;
+      const r = await axios.post(BASE + p, {}, { headers: buildHeaders(p) });
+      results.push({ method: "POST_complete", status: r.status, success: true, data: r.data });
+    } catch (e) {
+      results.push({ method: "POST_complete", status: e.response?.status, success: false, error: e.response?.data });
+    }
 
-    return res.json({
-      success: true,
-      data: updated,
-      g2g_response: g2gResponse
+    try {
+      const p = `/v2/orders/${orderId}/proof`;
+      const body = { proof: notes, proof_type: "text" };
+      const r = await axios.post(BASE + p, body, { headers: buildHeaders(p) });
+      results.push({ method: "POST_proof", status: r.status, success: true, data: r.data });
+    } catch (e) {
+      results.push({ method: "POST_proof", status: e.response?.status, success: false, error: e.response?.data });
+    }
+
+    try {
+      const p = `/v2/orders/${orderId}`;
+      const r = await axios.patch(BASE + p, { order_status: "delivered" }, { headers: buildHeaders(p) });
+      results.push({ method: "PATCH_order", status: r.status, success: true, data: r.data });
+    } catch (e) {
+      results.push({ method: "PATCH_order", status: e.response?.status, success: false, error: e.response?.data });
+    }
+
+    const success = results.some((r) => r.success && (r.status === 200 || r.status === 201));
+
+    if (success) {
+      await db.query(
+        `
+          UPDATE smm_orders 
+          SET g2g_delivered=true, status='completed', updated_at=NOW() 
+          WHERE id=$1
+        `,
+        [req.params.id]
+      );
+
+      await db.query(
+        `
+          UPDATE orders 
+          SET status='delivered', delivered_qty=purchased_qty, updated_at=NOW() 
+          WHERE order_id=$1
+        `,
+        [orderId]
+      );
+    }
+
+    res.json({
+      success,
+      orderId,
+      message: success ? "G2G delivery successful!" : "All methods failed - check results",
+      results
     });
-  } catch (error) {
-    return next(error);
+  } catch (err) {
+    console.error("[SMM] deliver-g2g error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

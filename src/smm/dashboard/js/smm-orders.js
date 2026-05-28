@@ -99,22 +99,45 @@ function renderStats() {
 
 function actionButtons(order) {
   const buttons = [];
+  const g2gOrderId = escapeHtml(order.g2g_order_id || "");
 
   if (order.status === "pending") {
-    buttons.push(`<button class="button-secondary" data-action="processing" data-id="${order.id}">Start Processing</button>`);
+    buttons.push(`
+      <button onclick="updateStatus(${order.id}, 'processing')"
+        style="background:#2196F3; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:4px;">
+        Start Processing
+      </button>
+    `);
   }
 
-  if (order.status !== "completed") {
-    buttons.push(`<button class="button" data-action="complete" data-id="${order.id}">Mark Completed</button>`);
+  if (order.status === "processing") {
+    buttons.push(`
+      <button onclick="updateStatus(${order.id}, 'completed')"
+        style="background:#4CAF50; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:4px;">
+        Mark Completed
+      </button>
+    `);
   }
 
   if (order.status !== "failed") {
     buttons.push(`<button class="button-danger" data-action="failed" data-id="${order.id}">Mark Failed</button>`);
   }
 
-  if (order.status === "completed" && !order.g2g_delivered) {
-    buttons.push(`<button class="button" data-action="deliver-g2g" data-id="${order.id}">Deliver to G2G</button>`);
-  }
+  buttons.push(`
+    <button 
+      id="deliver-btn-${order.id}"
+      onclick="deliverToG2G(${order.id}, '${g2gOrderId}')"
+      ${order.g2g_delivered ? "disabled" : ""}
+      style="
+        background: ${order.g2g_delivered ? "#2d5a27" : "#6c63ff"}; 
+        color:#fff; border:none; padding:8px 14px; 
+        border-radius:6px; cursor:pointer; 
+        margin-top:6px; display:block; width:100%;
+        font-weight:600;
+      ">
+      ${order.g2g_delivered ? "Delivered" : "Deliver to G2G"}
+    </button>
+  `);
 
   return buttons.join("");
 }
@@ -194,15 +217,19 @@ function openProofModal(id) {
 }
 
 async function updateStatus(id, status, notes = null) {
-  await fetchJson(`/smm/api/orders/${id}/status`, {
-    method: "PUT",
-    body: JSON.stringify({
-      status,
-      notes
-    })
-  });
-  showToast("success", `Order marked ${status}.`);
-  await loadOrders();
+  try {
+    await fetchJson(`/smm/api/orders/${id}/status`, {
+      method: "PUT",
+      body: JSON.stringify({
+        status,
+        notes
+      })
+    });
+    showToast("success", `Status updated to ${status}`);
+    await loadOrders();
+  } catch (err) {
+    showToast("error", "Error: " + err.message);
+  }
 }
 
 async function markCompleted() {
@@ -234,12 +261,49 @@ async function saveDeliveryId(id) {
   await loadOrders();
 }
 
-async function deliverToG2G(id) {
-  await fetchJson(`/smm/api/orders/${id}/deliver-g2g`, {
-    method: "POST"
-  });
-  showToast("success", "Delivered to G2G.");
-  await loadOrders();
+async function deliverToG2G(id, g2gOrderId) {
+  if (!confirm(`Deliver order ${g2gOrderId} to G2G?`)) return;
+
+  const btn = document.getElementById(`deliver-btn-${id}`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Delivering...";
+  }
+
+  try {
+    const res = await fetch(`/smm/api/orders/${id}/deliver-g2g`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      showToast("success", "G2G delivery successful! Payment will be released.");
+      if (btn) {
+        btn.textContent = "Delivered";
+        btn.style.background = "#2d5a27";
+        btn.disabled = true;
+      }
+      setTimeout(() => loadOrders(), 2000);
+    } else {
+      showToast("error", "Delivery failed - check details");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Deliver to G2G";
+      }
+
+      const failed = Array.isArray(data.results)
+        ? data.results.map((r) => `${r.method}: ${r.status}`).join("\n")
+        : JSON.stringify(data, null, 2);
+      alert("Results:\n\n" + failed + "\n\nCheck Render logs for details.");
+    }
+  } catch (err) {
+    showToast("error", "Error: " + err.message);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Deliver to G2G";
+    }
+  }
 }
 
 async function addOrder() {
@@ -287,10 +351,6 @@ function bindEvents() {
     const id = button.dataset.id;
     const action = button.dataset.action;
 
-    if (action === "processing") {
-      void updateStatus(id, "processing");
-    }
-
     if (action === "complete") {
       openProofModal(id);
     }
@@ -305,7 +365,8 @@ function bindEvents() {
     }
 
     if (action === "deliver-g2g") {
-      void deliverToG2G(id);
+      const order = getOrder(id);
+      void deliverToG2G(id, order?.g2g_order_id || "");
     }
   });
 }
@@ -317,3 +378,6 @@ document.addEventListener("DOMContentLoaded", () => {
     void loadOrders();
   }, 30_000);
 });
+
+window.deliverToG2G = deliverToG2G;
+window.updateStatus = updateStatus;
