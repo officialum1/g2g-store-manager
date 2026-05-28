@@ -31,54 +31,158 @@ function verifyWebhookSignature(timestamp, signature, rawBody) {
   return crypto.timingSafeEqual(provided, expected);
 }
 
-async function handleApiDeliveryEvent(payload, rawEvent) {
-  const existingOrder = await Order.findByOrderId(payload.order_id);
-  const offerType = normalizeOfferType(
-    payload.offer_type ||
-      payload.offer_service_type ||
-      existingOrder?.offer_type ||
-      null
+function getNestedValue(source, paths) {
+  for (const pathName of paths) {
+    const value = pathName.split(".").reduce((current, key) => {
+      if (!current || typeof current !== "object") {
+        return undefined;
+      }
+
+      return current[key];
+    }, source);
+
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function extractApiDeliveryPayload(payload = {}) {
+  const orderId = getNestedValue(payload, [
+    "order_id",
+    "orderId",
+    "order.id",
+    "id"
+  ]);
+  const offerId = getNestedValue(payload, [
+    "offer_id",
+    "offerId",
+    "offer.id",
+    "listing_id",
+    "product_id"
+  ]);
+  const buyerId = getNestedValue(payload, [
+    "buyer_id",
+    "buyerId",
+    "buyer.id",
+    "buyer.user_id",
+    "buyer.username"
+  ]);
+  const purchasedQty = Number.parseInt(
+    getNestedValue(payload, [
+      "purchased_qty",
+      "purchasedQty",
+      "quantity",
+      "qty"
+    ]) || 1,
+    10
   );
-  const deliveryMethod = {
+  const deliveredQty = Number.parseInt(
+    getNestedValue(payload, [
+      "delivered_qty",
+      "deliveredQty",
+      "delivered_quantity"
+    ]) || 0,
+    10
+  );
+  const deliveryId = getNestedValue(payload, [
+    "delivery_id",
+    "deliveryId",
+    "delivery.id",
+    "delivery_summary.delivery_id",
+    "delivery_summary.id"
+  ]);
+  const offerType = normalizeOfferType(
+    getNestedValue(payload, [
+      "offer_type",
+      "offerType",
+      "offer_service_type",
+      "product_type",
+      "delivery_type"
+    ])
+  );
+  const status =
+    getNestedValue(payload, [
+      "status",
+      "order_status",
+      "orderStatus"
+    ]) || "pending_delivery";
+
+  return {
+    order_id: orderId,
+    offer_id: offerId,
+    buyer_id: buyerId,
+    offer_type: offerType || null,
+    status,
+    purchased_qty: Number.isNaN(purchasedQty) ? 1 : purchasedQty,
+    delivered_qty: Number.isNaN(deliveredQty) ? 0 : deliveredQty,
+    delivery_id: deliveryId
+  };
+}
+
+function buildDeliveryMethod(payload = {}) {
+  return {
     ...(payload.delivery_summary || {}),
     delivery_method_list:
       payload.delivery_method_list ||
       payload.delivery_summary?.delivery_method_list ||
       []
   };
+}
+
+async function handleApiDeliveryEvent(payload, rawEvent) {
+  const extracted = extractApiDeliveryPayload(payload);
+
+  if (!extracted.order_id) {
+    throw new Error("order.api_delivery webhook missing order_id.");
+  }
+
+  console.log("[WEBHOOK] order.api_delivery received:", extracted.order_id);
 
   await Order.upsertFromPayload(payload, {
-    offer_id: payload.offer_id || existingOrder?.offer_id || null,
-    buyer_id: payload.buyer_id || existingOrder?.buyer_id || null,
-    offer_type: offerType || null,
-    status: payload.order_status || "pending_delivery",
+    order_id: extracted.order_id,
+    offer_id: extracted.offer_id,
+    buyer_id: extracted.buyer_id,
+    offer_type: extracted.offer_type,
+    status: extracted.status,
+    purchased_qty: extracted.purchased_qty,
+    delivered_qty: extracted.delivered_qty,
     raw_payload: rawEvent
   });
 
   await enqueueDeliveryJob({
-    order_id: payload.order_id,
-    offer_id: payload.offer_id || existingOrder?.offer_id || null,
-    offer_type: offerType || null,
-    buyer_id: payload.buyer_id || existingOrder?.buyer_id || null,
+    order_id: extracted.order_id,
+    offer_id: extracted.offer_id,
+    offer_type: extracted.offer_type,
+    buyer_id: extracted.buyer_id,
     buyer: payload.buyer || {
-      buyer_id: payload.buyer_id
+      buyer_id: extracted.buyer_id
     },
-    delivery_id: payload.delivery_summary?.delivery_id || null,
-    delivery_method: deliveryMethod,
-    purchased_qty: payload.purchased_qty,
-    delivered_qty: payload.delivered_qty,
+    delivery_id: extracted.delivery_id,
+    delivery_method: buildDeliveryMethod(payload),
+    purchased_qty: extracted.purchased_qty,
+    delivered_qty: extracted.delivered_qty,
     raw_payload: payload
   });
 }
 
 async function handleOrderConfirmedEvent(payload, rawEvent) {
-  const offerType = normalizeOfferType(
-    payload.offer_type || payload.offer_service_type || null
-  );
+  const extracted = extractApiDeliveryPayload(payload);
+
+  if (!extracted.order_id) {
+    throw new Error("order.confirmed webhook missing order_id.");
+  }
 
   await Order.upsertFromPayload(payload, {
-    offer_type: offerType || null,
-    status: payload.order_status || "confirmed",
+    order_id: extracted.order_id,
+    offer_id: extracted.offer_id,
+    buyer_id: extracted.buyer_id,
+    offer_type: extracted.offer_type,
+    status: extracted.status || "confirmed",
+    purchased_qty: extracted.purchased_qty,
+    delivered_qty: extracted.delivered_qty,
     raw_payload: rawEvent
   });
 }

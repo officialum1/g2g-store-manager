@@ -162,34 +162,6 @@ function buildRetryPayload(order, latestDelivery) {
   };
 }
 
-function extractOrdersFromG2GPayload(payload) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  if (!payload || typeof payload !== "object") {
-    return [];
-  }
-
-  const candidates = [
-    payload.data,
-    payload.orders,
-    payload.items,
-    payload.result,
-    payload.results,
-    payload.payload?.orders,
-    payload.payload?.data
-  ];
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate;
-    }
-  }
-
-  return [];
-}
-
 function getNestedValue(source, paths) {
   for (const pathName of paths) {
     const value = pathName.split(".").reduce((current, key) => {
@@ -266,8 +238,20 @@ function normalizeG2GOrderPayload(order) {
   };
 }
 
-function previewJson(value, maxLength = 500) {
-  return String(JSON.stringify(value) || "").slice(0, maxLength);
+function getDeliveryIdFromOrder(order, latestDelivery) {
+  const rawPayload =
+    order.raw_payload && typeof order.raw_payload === "object"
+      ? order.raw_payload
+      : {};
+
+  return (
+    latestDelivery?.delivery_id ||
+    rawPayload.delivery_id ||
+    rawPayload.payload?.delivery_id ||
+    rawPayload.delivery_summary?.delivery_id ||
+    rawPayload.payload?.delivery_summary?.delivery_id ||
+    null
+  );
 }
 
 function registerParentRoutes(parentApp) {
@@ -310,24 +294,6 @@ function registerParentRoutes(parentApp) {
     });
   });
 
-  parentApp.get("/api/g2g-test", async (req, res) => {
-    try {
-      const result = await g2gClient.getOrders();
-
-      return res.json({
-        success: true,
-        raw: result
-      });
-    } catch (err) {
-      console.error("[G2G TEST] Failed:", err.message, err.stack);
-
-      return res.status(500).json({
-        success: false,
-        error: err.message
-      });
-    }
-  });
-
   ordersApiRouter.get("/", async (req, res, next) => {
     try {
       const limit = Number.parseInt(req.query.limit || "200", 10);
@@ -341,53 +307,66 @@ function registerParentRoutes(parentApp) {
     }
   });
 
-  ordersApiRouter.get("/sync", async (req, res, next) => {
+  ordersApiRouter.get("/lookup/:orderId", async (req, res) => {
     try {
-      console.log("[SYNC] Starting G2G order sync...");
-      const result = await g2gClient.getOrders();
-      console.log("[SYNC] Raw G2G response:", previewJson(result));
-      const g2gOrders = extractOrdersFromG2GPayload(result);
-      let synced = 0;
+      const order = await g2gClient.getOrderById(req.params.orderId);
 
-      for (const g2gOrder of g2gOrders) {
-        const normalizedOrder = normalizeG2GOrderPayload(g2gOrder);
-
-        if (!normalizedOrder.order_id) {
-          continue;
-        }
-
-        const existingOrder = await Order.findByOrderId(normalizedOrder.order_id);
-
-        await Order.upsertFromPayload(normalizedOrder, {
-          order_id: normalizedOrder.order_id,
-          offer_id: normalizedOrder.offer_id,
-          buyer_id: normalizedOrder.buyer_id,
-          offer_type: normalizedOrder.offer_type,
-          status: normalizedOrder.status,
-          purchased_qty: Number.isNaN(normalizedOrder.purchased_qty)
-            ? 1
-            : normalizedOrder.purchased_qty,
-          delivered_qty: Number.isNaN(normalizedOrder.delivered_qty)
-            ? 0
-            : normalizedOrder.delivered_qty,
-          raw_payload: normalizedOrder.raw_payload
+      if (!order || !order.order_id) {
+        return res.status(404).json({
+          error: "Order not found in G2G response."
         });
-
-        if (!existingOrder) {
-          synced += 1;
-        }
       }
 
+      const normalizedOrder = normalizeG2GOrderPayload(order);
+      await query(
+        `
+          INSERT INTO orders (
+            order_id,
+            offer_id,
+            buyer_id,
+            offer_type,
+            status,
+            purchased_qty,
+            delivered_qty,
+            raw_payload,
+            created_at,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+          ON CONFLICT (order_id)
+          DO UPDATE SET
+            offer_id = EXCLUDED.offer_id,
+            buyer_id = EXCLUDED.buyer_id,
+            offer_type = EXCLUDED.offer_type,
+            status = EXCLUDED.status,
+            purchased_qty = EXCLUDED.purchased_qty,
+            delivered_qty = EXCLUDED.delivered_qty,
+            raw_payload = EXCLUDED.raw_payload,
+            updated_at = NOW()
+        `,
+        [
+          normalizedOrder.order_id,
+          normalizedOrder.offer_id,
+          normalizedOrder.buyer_id,
+          normalizedOrder.offer_type,
+          normalizedOrder.status,
+          Number.isNaN(normalizedOrder.purchased_qty)
+            ? 1
+            : normalizedOrder.purchased_qty,
+          Number.isNaN(normalizedOrder.delivered_qty)
+            ? 0
+            : normalizedOrder.delivered_qty,
+          JSON.stringify(order)
+        ]
+      );
+
       return res.json({
-        synced,
-        processed: g2gOrders.length,
-        raw: result
+        success: true,
+        order
       });
     } catch (err) {
-      console.error("[SYNC] Failed:", err.message, err.stack);
       return res.status(500).json({
-        error: err.message,
-        hint: "Check Render logs for full details"
+        error: err.message
       });
     }
   });
@@ -467,12 +446,19 @@ function registerParentRoutes(parentApp) {
 
       const manualDeliveryPayload = ["Delivered manually"];
       const latestDelivery = await getLatestDelivery(orderId);
+      const deliveryId = getDeliveryIdFromOrder(order, latestDelivery);
       const rawPayload =
         order.raw_payload && typeof order.raw_payload === "object"
           ? order.raw_payload
           : {};
 
-      await g2gClient.postDelivery(orderId, manualDeliveryPayload);
+      if (!deliveryId) {
+        return res.status(400).json({
+          error: "Delivery ID is required to mark this order delivered in G2G."
+        });
+      }
+
+      await g2gClient.deliverCode(orderId, deliveryId, manualDeliveryPayload);
 
       await Delivery.updateStatus(
         latestDelivery?.delivery_id || `manual-${orderId}`,

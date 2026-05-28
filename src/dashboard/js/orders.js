@@ -250,7 +250,7 @@ function renderOrders() {
   if (!state.orders.length) {
     tableBody.innerHTML = "";
     emptyMessage.textContent =
-      "No orders yet. Click 'Sync from G2G' to fetch your latest orders.";
+      "No orders yet. Orders appear automatically when buyers purchase. Use Lookup to find a specific order by ID.";
     emptyState.hidden = false;
     return;
   }
@@ -294,15 +294,26 @@ async function loadOrders() {
   }
 }
 
-async function syncOrders(button) {
+async function lookupOrder(button) {
+  const input = document.getElementById("lookup-order-id");
+  const orderId = String(input?.value || "").trim();
+
+  if (!orderId) {
+    showToast("error", "Enter a G2G Order ID first.");
+    input?.focus();
+    return;
+  }
+
   if (button) {
     button.disabled = true;
   }
 
   try {
-    const payload = await fetchJson("/api/orders/sync");
-    const synced = Number.parseInt(payload.synced || 0, 10);
-    showToast("success", `Synced ${synced} new order${synced === 1 ? "" : "s"}.`);
+    await fetchJson(`/api/orders/lookup/${encodeURIComponent(orderId)}`);
+    showToast("success", `Order ${orderId} added to the dashboard.`);
+    if (input) {
+      input.value = "";
+    }
     await loadOrders();
   } catch (error) {
     showToast("error", error.message);
@@ -392,9 +403,9 @@ function bindFilters() {
 
 function bindButtons() {
   const refreshButton = document.getElementById("refresh-orders-button");
-  const syncButton = document.getElementById("sync-orders-button");
-  const searchG2GButton = document.getElementById("search-g2g-button");
-  const emptySyncButton = document.getElementById("empty-sync-orders-button");
+  const lookupButton = document.getElementById("lookup-order-button");
+  const emptyLookupButton = document.getElementById("empty-lookup-order-button");
+  const lookupInput = document.getElementById("lookup-order-id");
   const closeModalButton = document.getElementById("close-order-details-button");
   const modal = document.getElementById("order-details-modal");
   const tableBody = document.getElementById("orders-table-body");
@@ -403,16 +414,18 @@ function bindButtons() {
     void loadOrders();
   });
 
-  syncButton?.addEventListener("click", () => {
-    void syncOrders(syncButton);
+  lookupButton?.addEventListener("click", () => {
+    void lookupOrder(lookupButton);
   });
 
-  searchG2GButton?.addEventListener("click", () => {
-    void syncOrders(searchG2GButton);
+  emptyLookupButton?.addEventListener("click", () => {
+    lookupInput?.focus();
   });
 
-  emptySyncButton?.addEventListener("click", () => {
-    void syncOrders(emptySyncButton);
+  lookupInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      void lookupOrder(lookupButton);
+    }
   });
 
   closeModalButton?.addEventListener("click", closeDetailsModal);

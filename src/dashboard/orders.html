@@ -35,18 +35,36 @@
         color: #fb923c;
       }
 
-      .orders-toolbar {
+      .info-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 20px;
+        padding: 16px 18px;
+        border: 1px solid rgba(108, 99, 255, 0.28);
+        border-radius: 16px;
+        background: rgba(108, 99, 255, 0.1);
+      }
+
+      .info-banner p {
+        margin: 0;
+        color: var(--text);
+      }
+
+      .lookup-panel {
         display: grid;
-        grid-template-columns: minmax(220px, 1.4fr) minmax(170px, 0.7fr) minmax(170px, 0.7fr) auto;
-        gap: 14px;
+        grid-template-columns: minmax(260px, 1fr) auto;
+        gap: 12px;
+        align-items: end;
         margin-bottom: 18px;
       }
 
-      .toolbar-actions {
-        align-self: end;
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
+      .orders-toolbar {
+        display: grid;
+        grid-template-columns: minmax(220px, 1.4fr) minmax(170px, 0.7fr) minmax(170px, 0.7fr);
+        gap: 14px;
+        margin-bottom: 18px;
       }
 
       .order-actions {
@@ -61,7 +79,7 @@
       }
 
       .orders-empty-card p {
-        max-width: 520px;
+        max-width: 620px;
         margin: 0;
         color: var(--muted);
         font-size: 1rem;
@@ -87,12 +105,14 @@
       }
 
       @media (max-width: 720px) {
+        .info-banner,
+        .lookup-panel,
         .orders-toolbar {
           grid-template-columns: 1fr;
         }
 
-        .toolbar-actions {
-          align-self: stretch;
+        .info-banner {
+          align-items: flex-start;
         }
 
         .order-actions {
@@ -134,14 +154,19 @@
         <header class="page-header">
           <div>
             <h2>Orders Overview</h2>
-            <p>Sync, search, inspect, and complete G2G orders from one queue.</p>
+            <p>Webhook-first order queue with manual lookup for known order IDs.</p>
           </div>
           <div class="header-actions">
-            <button id="sync-orders-button" class="button">Sync from G2G</button>
             <button id="refresh-orders-button" class="button-secondary">Refresh Now</button>
             <span id="orders-last-refresh" class="last-updated">Waiting for first refresh...</span>
           </div>
         </header>
+
+        <section class="info-banner">
+          <p>
+            Orders appear automatically when buyers purchase. Use Lookup to find a specific order by ID.
+          </p>
+        </section>
 
         <section class="grid-cards">
           <article class="card">
@@ -172,6 +197,19 @@
               <h3>Order Queue</h3>
               <p>Auto-refreshes every 30 seconds.</p>
             </div>
+          </div>
+
+          <div class="lookup-panel" aria-label="Lookup order by ID">
+            <div class="field-group">
+              <label for="lookup-order-id">Lookup Order by ID</label>
+              <input
+                id="lookup-order-id"
+                type="text"
+                placeholder="Enter G2G Order ID to look it up"
+                autocomplete="off"
+              />
+            </div>
+            <button id="lookup-order-button" class="button">Lookup Order</button>
           </div>
 
           <div class="orders-toolbar" aria-label="Order filters">
@@ -205,10 +243,6 @@
                 <option value="all" selected>All time</option>
               </select>
             </div>
-
-            <div class="toolbar-actions">
-              <button id="search-g2g-button" class="button-secondary">Search G2G</button>
-            </div>
           </div>
 
           <div class="table-wrap">
@@ -231,9 +265,9 @@
 
           <div id="orders-empty" class="empty-state orders-empty-card" hidden>
             <p id="orders-empty-message">
-              No orders yet. Click 'Sync from G2G' to fetch your latest orders.
+              No orders yet. Orders appear automatically when buyers purchase. Use Lookup to find a specific order by ID.
             </p>
-            <button id="empty-sync-orders-button" class="button">Sync from G2G</button>
+            <button id="empty-lookup-order-button" class="button">Lookup Order by ID</button>
           </div>
         </section>
       </main>
