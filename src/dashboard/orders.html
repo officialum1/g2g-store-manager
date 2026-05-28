@@ -6,9 +6,98 @@
     <title>Orders Dashboard | G2G Store Manager</title>
     <link rel="stylesheet" href="/dashboard/css/style.css" />
     <style>
+      .nav-link.with-badge {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .orders-count-badge {
+        min-width: 24px;
+        height: 24px;
+        padding: 0 8px;
+        border-radius: 999px;
+        display: inline-grid;
+        place-items: center;
+        background: #ef4444;
+        color: #ffffff;
+        font-size: 0.78rem;
+        font-weight: 800;
+      }
+
+      .orders-count-badge[hidden] {
+        display: none;
+      }
+
       .status-badge.manual_pending {
         background: rgba(249, 115, 22, 0.18);
         color: #fb923c;
+      }
+
+      .orders-toolbar {
+        display: grid;
+        grid-template-columns: minmax(220px, 1.4fr) minmax(170px, 0.7fr) minmax(170px, 0.7fr) auto;
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+
+      .toolbar-actions {
+        align-self: end;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .order-actions {
+        min-width: 360px;
+      }
+
+      .orders-empty-card {
+        display: grid;
+        gap: 18px;
+        place-items: center;
+        padding: 44px 18px;
+      }
+
+      .orders-empty-card p {
+        max-width: 520px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 1rem;
+      }
+
+      .details-json {
+        max-height: 58vh;
+        overflow: auto;
+        padding: 16px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: #101010;
+        color: #e5e7eb;
+        font-size: 0.88rem;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+
+      @media (max-width: 1180px) {
+        .orders-toolbar {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 720px) {
+        .orders-toolbar {
+          grid-template-columns: 1fr;
+        }
+
+        .toolbar-actions {
+          align-self: stretch;
+        }
+
+        .order-actions {
+          min-width: 0;
+        }
       }
     </style>
   </head>
@@ -24,7 +113,10 @@
         </div>
 
         <nav class="nav-links">
-          <a class="nav-link" data-nav="orders" href="/dashboard/orders">Orders</a>
+          <a class="nav-link with-badge" data-nav="orders" href="/dashboard/orders">
+            <span>Orders</span>
+            <span id="orders-pending-badge" class="orders-count-badge" hidden>0</span>
+          </a>
           <a class="nav-link" data-nav="inventory" href="/dashboard/inventory">Inventory</a>
           <a class="nav-link" data-nav="settings" href="/dashboard/settings">Settings</a>
         </nav>
@@ -42,9 +134,10 @@
         <header class="page-header">
           <div>
             <h2>Orders Overview</h2>
-            <p>Track delivery progress, failures, and retries in one place.</p>
+            <p>Sync, search, inspect, and complete G2G orders from one queue.</p>
           </div>
           <div class="header-actions">
+            <button id="sync-orders-button" class="button">Sync from G2G</button>
             <button id="refresh-orders-button" class="button-secondary">Refresh Now</button>
             <span id="orders-last-refresh" class="last-updated">Waiting for first refresh...</span>
           </div>
@@ -81,6 +174,43 @@
             </div>
           </div>
 
+          <div class="orders-toolbar" aria-label="Order filters">
+            <div class="field-group">
+              <label for="order-search">Search</label>
+              <input
+                id="order-search"
+                type="search"
+                placeholder="Order ID or Buyer ID"
+                autocomplete="off"
+              />
+            </div>
+
+            <div class="field-group">
+              <label for="status-filter">Status</label>
+              <select id="status-filter">
+                <option value="all">All</option>
+                <option value="pending">Pending</option>
+                <option value="delivering">Delivering</option>
+                <option value="completed">Completed</option>
+                <option value="failed">Failed</option>
+                <option value="manual_pending">Manual Required</option>
+              </select>
+            </div>
+
+            <div class="field-group">
+              <label for="date-filter">Date</label>
+              <select id="date-filter">
+                <option value="today">Today</option>
+                <option value="last_7_days">Last 7 days</option>
+                <option value="all" selected>All time</option>
+              </select>
+            </div>
+
+            <div class="toolbar-actions">
+              <button id="search-g2g-button" class="button-secondary">Search G2G</button>
+            </div>
+          </div>
+
           <div class="table-wrap">
             <table>
               <thead>
@@ -99,11 +229,34 @@
             </table>
           </div>
 
-          <div id="orders-empty" class="empty-state" hidden>
-            No orders available yet.
+          <div id="orders-empty" class="empty-state orders-empty-card" hidden>
+            <p id="orders-empty-message">
+              No orders yet. Click 'Sync from G2G' to fetch your latest orders.
+            </p>
+            <button id="empty-sync-orders-button" class="button">Sync from G2G</button>
           </div>
         </section>
       </main>
+    </div>
+
+    <div
+      id="order-details-modal"
+      class="modal"
+      aria-hidden="true"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="order-details-title"
+    >
+      <div class="modal-card">
+        <div class="table-header">
+          <div>
+            <h3 id="order-details-title">Order Details</h3>
+            <p>Raw G2G order payload.</p>
+          </div>
+          <button id="close-order-details-button" class="button-secondary">Close</button>
+        </div>
+        <pre id="order-details-json" class="details-json">{}</pre>
+      </div>
     </div>
 
     <div id="toast-container" class="toast-container"></div>
@@ -133,86 +286,5 @@
       })();
     </script>
     <script src="/dashboard/js/orders.js"></script>
-    <script>
-      function getOrderStatusLabel(order) {
-        if (order.dashboard_status === "manual_pending") {
-          return "Manual Required";
-        }
-
-        return capitalize(order.dashboard_status);
-      }
-
-      buildRow = function (order) {
-        var retryDisabled = order.dashboard_status !== "failed" ? "disabled" : "";
-
-        return `
-          <tr>
-            <td>${order.order_id || "—"}</td>
-            <td>${capitalize(order.offer_type || "unknown")}</td>
-            <td>${order.buyer_id || "—"}</td>
-            <td>
-              <span class="status-badge ${order.dashboard_status}">
-                ${getOrderStatusLabel(order)}
-              </span>
-            </td>
-            <td>${Number.parseInt(order.purchased_qty || 0, 10)}</td>
-            <td>${Number.parseInt(order.delivered_qty || 0, 10)}</td>
-            <td>${formatDate(order.created_at)}</td>
-            <td>
-              <div class="button-row">
-                <button
-                  class="button-secondary retry-button"
-                  data-order-id="${order.order_id}"
-                  ${retryDisabled}
-                >
-                  Retry Delivery
-                </button>
-                <button
-                  class="button complete-button"
-                  data-order-id="${order.order_id}"
-                >
-                  Mark as Delivered
-                </button>
-              </div>
-            </td>
-          </tr>
-        `;
-      };
-
-      async function completeOrderDelivery(orderId, button) {
-        button.disabled = true;
-
-        try {
-          await fetchJson(`/api/orders/${encodeURIComponent(orderId)}/complete`, {
-            method: "POST"
-          });
-          showToast("success", `Order ${orderId} marked as delivered.`);
-          await loadOrders();
-        } catch (error) {
-          showToast("error", error.message);
-          button.disabled = false;
-        }
-      }
-
-      document.addEventListener("DOMContentLoaded", function () {
-        var tableBody = document.getElementById("orders-table-body");
-
-        tableBody.addEventListener("click", function (event) {
-          var button = event.target.closest(".complete-button");
-
-          if (!button || button.disabled) {
-            return;
-          }
-
-          var orderId = button.dataset.orderId;
-
-          if (!orderId) {
-            return;
-          }
-
-          void completeOrderDelivery(orderId, button);
-        });
-      });
-    </script>
   </body>
 </html>

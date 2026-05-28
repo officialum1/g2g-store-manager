@@ -4,7 +4,7 @@ const { query, withTransaction } = require("../db");
 const Order = require("../db/models/Order");
 const Delivery = require("../db/models/Delivery");
 const { enqueueDeliveryJob } = require("../jobs/deliveryQueue");
-const { postDelivery } = require("../services/g2gClient");
+const { getOrders, postDelivery } = require("../services/g2gClient");
 
 const dashboardApp = express();
 const dashboardDirectory = path.join(__dirname, "..", "dashboard");
@@ -162,6 +162,110 @@ function buildRetryPayload(order, latestDelivery) {
   };
 }
 
+function extractOrdersFromG2GPayload(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const candidates = [
+    payload.data,
+    payload.orders,
+    payload.items,
+    payload.result,
+    payload.results,
+    payload.payload?.orders,
+    payload.payload?.data
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  return [];
+}
+
+function getNestedValue(source, paths) {
+  for (const pathName of paths) {
+    const value = pathName.split(".").reduce((current, key) => {
+      if (!current || typeof current !== "object") {
+        return undefined;
+      }
+
+      return current[key];
+    }, source);
+
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function normalizeG2GOrderPayload(order) {
+  const orderId = getNestedValue(order, [
+    "order_id",
+    "orderId",
+    "id",
+    "order.id"
+  ]);
+
+  return {
+    ...order,
+    order_id: orderId,
+    offer_id: getNestedValue(order, [
+      "offer_id",
+      "offerId",
+      "offer.id",
+      "listing_id",
+      "product_id"
+    ]),
+    buyer_id: getNestedValue(order, [
+      "buyer_id",
+      "buyerId",
+      "buyer.id",
+      "buyer.user_id",
+      "buyer.username"
+    ]),
+    offer_type: getNestedValue(order, [
+      "offer_type",
+      "offerType",
+      "offer_service_type",
+      "product_type",
+      "delivery_type"
+    ]),
+    status: getNestedValue(order, [
+      "status",
+      "order_status",
+      "orderStatus"
+    ]) || "pending_delivery",
+    purchased_qty: Number.parseInt(
+      getNestedValue(order, [
+        "purchased_qty",
+        "purchasedQty",
+        "quantity",
+        "qty"
+      ]) || 1,
+      10
+    ),
+    delivered_qty: Number.parseInt(
+      getNestedValue(order, [
+        "delivered_qty",
+        "deliveredQty",
+        "delivered_quantity"
+      ]) || 0,
+      10
+    ),
+    raw_payload: order
+  };
+}
+
 function registerParentRoutes(parentApp) {
   if (parentApp.locals.dashboardExtensionsRegistered) {
     return;
@@ -190,6 +294,82 @@ function registerParentRoutes(parentApp) {
       return res.json({
         data: orders
       });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  ordersApiRouter.get("/sync", async (req, res, next) => {
+    try {
+      const g2gResponse = await getOrders();
+      const g2gOrders = extractOrdersFromG2GPayload(g2gResponse);
+      let synced = 0;
+
+      for (const g2gOrder of g2gOrders) {
+        const normalizedOrder = normalizeG2GOrderPayload(g2gOrder);
+
+        if (!normalizedOrder.order_id) {
+          continue;
+        }
+
+        const existingOrder = await Order.findByOrderId(normalizedOrder.order_id);
+
+        await Order.upsertFromPayload(normalizedOrder, {
+          order_id: normalizedOrder.order_id,
+          offer_id: normalizedOrder.offer_id,
+          buyer_id: normalizedOrder.buyer_id,
+          offer_type: normalizedOrder.offer_type,
+          status: normalizedOrder.status,
+          purchased_qty: Number.isNaN(normalizedOrder.purchased_qty)
+            ? 1
+            : normalizedOrder.purchased_qty,
+          delivered_qty: Number.isNaN(normalizedOrder.delivered_qty)
+            ? 0
+            : normalizedOrder.delivered_qty,
+          raw_payload: normalizedOrder.raw_payload
+        });
+
+        if (!existingOrder) {
+          synced += 1;
+        }
+      }
+
+      return res.json({
+        synced,
+        processed: g2gOrders.length
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  ordersApiRouter.get("/counts", async (req, res, next) => {
+    try {
+      const orders = await listOrdersWithLatestDelivery(1000);
+      const counts = orders.reduce(
+        (accumulator, order) => {
+          if (order.dashboard_status === "pending") {
+            accumulator.pending += 1;
+          }
+
+          if (order.dashboard_status === "failed") {
+            accumulator.failed += 1;
+          }
+
+          if (order.dashboard_status === "manual_pending") {
+            accumulator.manual_pending += 1;
+          }
+
+          return accumulator;
+        },
+        {
+          pending: 0,
+          failed: 0,
+          manual_pending: 0
+        }
+      );
+
+      return res.json(counts);
     } catch (error) {
       return next(error);
     }
