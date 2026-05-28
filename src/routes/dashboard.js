@@ -330,6 +330,29 @@ function registerParentRoutes(parentApp) {
     }
   });
 
+  parentApp.get("/api/orders/:orderId/deliveries-test", async (req, res) => {
+    try {
+      const { orderId } = req.params;
+      const urlPath = `/v2/orders/${orderId}/deliveries`;
+      const axios = require("axios");
+      const { buildHeaders } = require("../services/g2gClient");
+      const response = await axios.get(
+        `https://open-api.g2g.com${urlPath}`,
+        { headers: buildHeaders(urlPath) }
+      );
+      res.json({
+        status: response.status,
+        full_response: response.data
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err.message,
+        g2g_response: err.response?.data,
+        g2g_status: err.response?.status
+      });
+    }
+  });
+
   ordersApiRouter.get("/", async (req, res, next) => {
     try {
       const limit = Number.parseInt(req.query.limit || "200", 10);
