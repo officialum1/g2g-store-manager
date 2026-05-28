@@ -1,5 +1,4 @@
 const express = require("express");
-const axios = require("axios");
 const path = require("path");
 const { query, withTransaction } = require("../db");
 const Order = require("../db/models/Order");
@@ -9,8 +8,6 @@ const g2gClient = require("../services/g2gClient");
 
 const dashboardApp = express();
 const dashboardDirectory = path.join(__dirname, "..", "dashboard");
-const G2G_BASE_URL = "https://open-api.g2g.com";
-const G2G_API_VERSION = "v2";
 
 function normalizeDashboardStatus(order) {
   const orderStatus = String(order.status || "").toLowerCase();
@@ -365,27 +362,25 @@ function registerParentRoutes(parentApp) {
         null;
 
       if (!deliveryId) {
-        try {
-          const deliveriesPath = `/${G2G_API_VERSION}/order/${normalizedOrder.order_id}/deliveries`;
-          const dRes = await axios.get(G2G_BASE_URL + deliveriesPath, {
-            headers: g2gClient.buildHeaders(deliveriesPath)
-          });
-          console.log(
-            "[G2G] deliveries response:",
-            JSON.stringify(dRes.data).slice(0, 500)
-          );
-          const deliveries =
-            dRes.data?.payload?.delivery_list ||
-            dRes.data?.payload?.deliveries ||
-            [];
+        const deliveriesPayload = await g2gClient.getDeliveries(
+          normalizedOrder.order_id
+        );
+        console.log("[LOOKUP] deliveries payload:", JSON.stringify(deliveriesPayload));
 
-          if (deliveries.length > 0) {
-            deliveryId = deliveries[0].delivery_id;
-            order.fetched_delivery_id = deliveryId;
-            order.delivery_list = deliveries;
-          }
-        } catch (dErr) {
-          console.log("[G2G] deliveries fetch skipped:", dErr.response?.status);
+        const deliveryList =
+          deliveriesPayload?.delivery_list ||
+          deliveriesPayload?.deliveries ||
+          (Array.isArray(deliveriesPayload) ? deliveriesPayload : []);
+
+        const firstDelivery = deliveryList[0] || {};
+        deliveryId = firstDelivery.delivery_id || firstDelivery.id || null;
+
+        console.log("[LOOKUP] extracted deliveryId:", deliveryId);
+        console.log("[LOOKUP] firstDelivery keys:", Object.keys(firstDelivery));
+
+        if (deliveryId) {
+          order.fetched_delivery_id = deliveryId;
+          order.delivery_list = deliveryList;
         }
       }
 

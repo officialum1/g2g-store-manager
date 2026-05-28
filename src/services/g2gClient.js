@@ -41,6 +41,7 @@ async function getOrderById(orderId) {
       });
 
       console.log("[G2G] getOrderById success at:", urlPath, res.status);
+      console.log("[G2G] FULL order response:", JSON.stringify(res.data));
 
       return res.data?.payload;
     } catch (err) {
@@ -54,6 +55,29 @@ async function getOrderById(orderId) {
   }
 
   throw new Error("Order not found on G2G - check order ID format");
+}
+
+async function getDeliveries(orderId) {
+  const urlPath = `/${API_VERSION}/orders/${orderId}/deliveries`;
+  const url = BASE_URL + urlPath;
+
+  try {
+    const res = await axios.get(url, {
+      headers: buildHeaders(urlPath)
+    });
+
+    console.log("[G2G] getDeliveries full response:", JSON.stringify(res.data));
+
+    return res.data?.payload;
+  } catch (err) {
+    console.error(
+      "[G2G] getDeliveries error:",
+      err.response?.status,
+      JSON.stringify(err.response?.data)
+    );
+
+    return null;
+  }
 }
 
 async function getStoreSettings() {
@@ -146,6 +170,7 @@ async function postDelivery(orderId, codes, deliveryId = null) {
 
 module.exports = {
   getOrderById,
+  getDeliveries,
   getStoreSettings,
   deliverCode,
   patchDelivery,
