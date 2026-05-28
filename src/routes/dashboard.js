@@ -294,6 +294,15 @@ function registerParentRoutes(parentApp) {
     });
   });
 
+  parentApp.get("/api/g2g-test", async (req, res) => {
+    try {
+      const result = await g2gClient.getStoreSettings();
+      res.json({ success: true, store: result });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   ordersApiRouter.get("/", async (req, res, next) => {
     try {
       const limit = Number.parseInt(req.query.limit || "200", 10);
