@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SMM Panel | G2G Store Manager</title>
+    <link rel="stylesheet" href="/smm/css/smm-style.css" />
+  </head>
+  <body>
+    <div class="smm-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <h1>SMM Panel</h1>
+          <p>Views, followers, likes, comments</p>
+        </div>
+
+        <nav>
+          <div class="nav-link active" data-filter="all">
+            <span>All Orders</span>
+            <span class="nav-badge" data-count="all">0</span>
+          </div>
+          <div class="nav-link" data-filter="pending">
+            <span>Pending</span>
+            <span class="nav-badge" data-count="pending">0</span>
+          </div>
+          <div class="nav-link" data-filter="processing">
+            <span>Processing</span>
+            <span class="nav-badge" data-count="processing">0</span>
+          </div>
+          <div class="nav-link" data-filter="completed">
+            <span>Completed</span>
+            <span class="nav-badge" data-count="completed">0</span>
+          </div>
+          <div class="nav-link" data-filter="failed">
+            <span>Failed</span>
+            <span class="nav-badge" data-count="failed">0</span>
+          </div>
+          <div class="nav-link" id="add-order-button">
+            <span>Add Order</span>
+            <span>+</span>
+          </div>
+        </nav>
+      </aside>
+
+      <main class="main">
+        <header class="page-header">
+          <div>
+            <h2>SMM Orders</h2>
+            <p>Manage platform engagement orders and delivery back to G2G.</p>
+          </div>
+          <div class="last-refreshed" id="last-refreshed">Last refreshed: never</div>
+        </header>
+
+        <section class="stats-grid">
+          <article class="stat-card">
+            <span>Total Orders</span>
+            <strong id="stat-total">0</strong>
+          </article>
+          <article class="stat-card">
+            <span>Pending</span>
+            <strong id="stat-pending">0</strong>
+          </article>
+          <article class="stat-card">
+            <span>Processing</span>
+            <strong id="stat-processing">0</strong>
+          </article>
+          <article class="stat-card">
+            <span>Completed Today</span>
+            <strong id="stat-completed-today">0</strong>
+          </article>
+          <article class="stat-card">
+            <span>Failed</span>
+            <strong id="stat-failed">0</strong>
+          </article>
+        </section>
+
+        <section class="table-card">
+          <div class="table-toolbar">
+            <div>
+              <strong>Order Queue</strong>
+              <p class="last-refreshed">Auto-refreshes every 30 seconds.</p>
+            </div>
+            <button class="button" onclick="document.getElementById('add-order-button').click()">Add Order</button>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order ID (G2G)</th>
+                  <th>Platform</th>
+                  <th>Service</th>
+                  <th>Link</th>
+                  <th>Quantity</th>
+                  <th>Buyer</th>
+                  <th>Status</th>
+                  <th>Created At</th>
+                  <th>G2G Delivery ID</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="orders-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="proof-modal" class="modal">
+      <div class="modal-card">
+        <h3>Mark Order Completed</h3>
+        <div id="proof-details"></div>
+        <div class="field">
+          <label for="proof-notes">Delivery notes / proof description</label>
+          <textarea id="proof-notes" rows="5"></textarea>
+        </div>
+        <div class="field">
+          <label for="proof-url">Proof screenshot URL (optional)</label>
+          <input id="proof-url" type="url" placeholder="https://..." />
+        </div>
+        <div class="modal-actions">
+          <button id="cancel-proof" class="button-secondary">Cancel</button>
+          <button id="confirm-proof" class="button">Confirm Completion</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="add-modal" class="modal">
+      <div class="modal-card">
+        <h3>Add SMM Order</h3>
+        <form id="add-order-form">
+          <div class="two-col">
+            <div class="field">
+              <label for="g2g_order_id">G2G Order ID</label>
+              <input id="g2g_order_id" name="g2g_order_id" required />
+            </div>
+            <div class="field">
+              <label for="g2g_delivery_id">G2G Delivery ID</label>
+              <input id="g2g_delivery_id" name="g2g_delivery_id" />
+            </div>
+          </div>
+
+          <div class="two-col">
+            <div class="field">
+              <label for="platform">Platform</label>
+              <select id="platform" name="platform">
+                <option value="tiktok">TikTok</option>
+                <option value="youtube">YouTube</option>
+                <option value="instagram">Instagram</option>
+                <option value="facebook">Facebook</option>
+                <option value="twitter">Twitter</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="service_type">Service</label>
+              <select id="service_type" name="service_type">
+                <option value="views">Views</option>
+                <option value="followers">Followers</option>
+                <option value="likes">Likes</option>
+                <option value="comments">Comments</option>
+                <option value="shares">Shares</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="link">Link</label>
+            <input id="link" name="link" type="url" required />
+          </div>
+
+          <div class="two-col">
+            <div class="field">
+              <label for="quantity">Quantity</label>
+              <input id="quantity" name="quantity" type="number" min="1" required />
+            </div>
+            <div class="field">
+              <label for="buyer_username">Buyer Username</label>
+              <input id="buyer_username" name="buyer_username" />
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" id="cancel-add" class="button-secondary">Cancel</button>
+            <button type="submit" class="button">Save Order</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+    <script src="/smm/js/smm-orders.js"></script>
+  </body>
+</html>

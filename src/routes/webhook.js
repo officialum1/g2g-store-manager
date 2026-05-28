@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const express = require("express");
 const { config } = require("../config");
-const { logWebhookPayload } = require("../db");
+const { logWebhookPayload, query } = require("../db");
 const Order = require("../db/models/Order");
 const { enqueueDeliveryJob } = require("../jobs/deliveryQueue");
 const { normalizeOfferType } = require("../services/deliveryService");
@@ -132,6 +132,58 @@ function buildDeliveryMethod(payload = {}) {
   };
 }
 
+function getSmmLink(payload = {}) {
+  return (
+    payload.additional_info?.link ||
+    payload.link ||
+    getNestedValue(payload, [
+      "delivery_summary.additional_info_list.0.value",
+      "delivery_summary.delivery_method_list.0.value"
+    ]) ||
+    ""
+  );
+}
+
+async function createSmmOrderIfNeeded(payload, extracted) {
+  const serviceType =
+    payload.engagement_type ||
+    payload.smm_service_type ||
+    payload.service ||
+    "views";
+
+  if (
+    payload.service_type === "platform_engagement" ||
+    extracted.offer_type === "smm" ||
+    extracted.offer_type === "views"
+  ) {
+    await query(
+      `
+        INSERT INTO smm_orders (
+          g2g_order_id,
+          g2g_offer_id,
+          buyer_id,
+          link,
+          quantity,
+          status,
+          service_type,
+          platform
+        )
+        VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)
+        ON CONFLICT (g2g_order_id) DO NOTHING
+      `,
+      [
+        extracted.order_id,
+        extracted.offer_id,
+        extracted.buyer_id,
+        getSmmLink(payload),
+        extracted.purchased_qty || 1,
+        serviceType,
+        payload.platform || "tiktok"
+      ]
+    );
+  }
+}
+
 async function handleApiDeliveryEvent(payload, rawEvent) {
   const extracted = extractApiDeliveryPayload(payload);
 
@@ -151,6 +203,8 @@ async function handleApiDeliveryEvent(payload, rawEvent) {
     delivered_qty: extracted.delivered_qty,
     raw_payload: rawEvent
   });
+
+  await createSmmOrderIfNeeded(payload, extracted);
 
   await enqueueDeliveryJob({
     order_id: extracted.order_id,

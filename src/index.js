@@ -17,6 +17,8 @@ app.use(express.json({ limit: "1mb" }));
 app.get("/", (req, res) => res.redirect("/dashboard/orders"));
 app.use("/dashboard", dashboardRouter);
 app.use("/api/settings", settingsRouter);
+app.use("/smm", require("./smm/routes/smmDashboard"));
+app.use("/smm", require("./smm/routes/smmOrders"));
 app.use("/orders", ordersRouter);
 app.use("/delivery", deliveryRouter);
 

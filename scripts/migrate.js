@@ -73,6 +73,29 @@ const migrations = [
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `
+  },
+  {
+    name: "smm_orders",
+    sql: `
+      CREATE TABLE IF NOT EXISTS smm_orders (
+        id SERIAL PRIMARY KEY,
+        g2g_order_id VARCHAR UNIQUE,
+        g2g_offer_id VARCHAR,
+        buyer_id VARCHAR,
+        buyer_username VARCHAR,
+        service_type VARCHAR,
+        platform VARCHAR,
+        link TEXT,
+        quantity INTEGER,
+        status VARCHAR DEFAULT 'pending',
+        proof_url TEXT,
+        notes TEXT,
+        g2g_delivery_id VARCHAR,
+        g2g_delivered BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `
   }
 ];
 
