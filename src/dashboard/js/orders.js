@@ -556,9 +556,10 @@ function openDeliveryModal(orderId) {
   const buyerInfo = document.getElementById("modalBuyerInfo");
   const deliveryType = document.getElementById("deliveryType");
   const codesField = document.getElementById("deliveryCodes");
+  const deliveryIdInput = document.getElementById("modalDeliveryIdInput");
   const deliveryId = getDeliveryId(order || {});
 
-  if (!order || !modal || !title || !buyerInfo || !deliveryType || !codesField) {
+  if (!order || !modal || !title || !buyerInfo || !deliveryType || !codesField || !deliveryIdInput) {
     return;
   }
 
@@ -570,8 +571,8 @@ function openDeliveryModal(orderId) {
     <p><strong>Buyer ID:</strong> ${escapeHtml(order.buyer_id || "-")}</p>
     <p><strong>Qty:</strong> ${Number.parseInt(order.purchased_qty || 0, 10)} purchased / ${Number.parseInt(order.delivered_qty || 0, 10)} delivered</p>
     <p><strong>Status:</strong> ${escapeHtml(getOrderStatusLabel(order))}</p>
-    <p><strong>Delivery ID:</strong> <span id="modalDeliveryId">${escapeHtml(deliveryId || "Missing")}</span></p>
   `;
+  deliveryIdInput.value = deliveryId || "";
   renderModalAdditionalInfo(order);
   deliveryType.value = String(order.offer_type || "").toLowerCase().includes("boost")
     ? "boost"
@@ -594,7 +595,7 @@ function closeModal() {
 async function confirmDelivery() {
   const orderId = state.selectedDeliveryOrderId;
   const order = state.orders.find((item) => String(item.order_id) === String(orderId));
-  const deliveryId = getDeliveryId(order || {});
+  const deliveryId = document.getElementById("modalDeliveryIdInput")?.value?.trim();
   const deliveryType = document.getElementById("deliveryType")?.value || "code";
   const codes = String(document.getElementById("deliveryCodes")?.value || "")
     .split(/\r?\n/)
@@ -607,7 +608,7 @@ async function confirmDelivery() {
   }
 
   if (!deliveryId) {
-    showToast("error", "Delivery ID is missing from the order payload.");
+    alert("Please enter a Delivery ID! Try: D1779535809637");
     return;
   }
 
