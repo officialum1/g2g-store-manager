@@ -1,5 +1,4 @@
 const express = require("express");
-const { query } = require("../../db");
 const g2gClient = require("../../services/g2gClient");
 const SmmOrder = require("../models/SmmOrder");
 
@@ -9,27 +8,6 @@ router.use(express.json({ limit: "512kb" }));
 
 function normalizeOrderId(value) {
   return String(value || "").trim();
-}
-
-function getDeliveryIdFromPayload(payload) {
-  const deliveries =
-    payload?.delivery_list ||
-    payload?.deliveries ||
-    (Array.isArray(payload) ? payload : []);
-  const firstDelivery = Array.isArray(deliveries) ? deliveries[0] : null;
-
-  return firstDelivery?.delivery_id || firstDelivery?.id || null;
-}
-
-function buildG2GProof(order) {
-  const lines = [
-    order.notes || "SMM delivery completed.",
-    order.proof_url ? `Proof: ${order.proof_url}` : null,
-    order.link ? `Target: ${order.link}` : null,
-    order.quantity ? `Quantity: ${order.quantity}` : null
-  ].filter(Boolean);
-
-  return lines.join("\n");
 }
 
 router.get("/api/orders", async (req, res, next) => {
@@ -178,9 +156,6 @@ router.post("/api/orders/:id/set-delivery-id", async (req, res, next) => {
 
 router.post("/api/orders/:id/deliver-g2g", async (req, res) => {
   const db = require("../../db");
-  const axios = require("axios");
-  const { buildHeaders } = require("../../services/g2gClient");
-  const BASE = "https://open-api.g2g.com";
 
   try {
     const result = await db.query("SELECT * FROM smm_orders WHERE id=$1", [req.params.id]);
@@ -188,93 +163,28 @@ router.post("/api/orders/:id/deliver-g2g", async (req, res) => {
 
     const smmOrder = result.rows[0];
     const orderId = smmOrder.g2g_order_id;
-    const notes = smmOrder.notes || "Order delivered successfully";
-    const results = [];
 
-    try {
-      const p = `/v2/orders/${orderId}/deliveries`;
-      const r = await axios.get(BASE + p, { headers: buildHeaders(p) });
-      const list = r.data?.payload?.delivery_list || r.data?.payload?.deliveries || [];
-      for (const d of list) {
-        const did = d.delivery_id || d.id;
-        if (did) {
-          try {
-            const pp = `/v2/orders/${orderId}/delivery/${did}`;
-            const pr = await axios.patch(
-              BASE + pp,
-              { status: "delivered" },
-              { headers: buildHeaders(pp) }
-            );
-            results.push({ method: "PATCH_delivery", delivery_id: did, status: pr.status, success: true });
-          } catch (e) {
-            results.push({
-              method: "PATCH_delivery",
-              delivery_id: did,
-              status: e.response?.status,
-              success: false,
-              error: e.response?.data
-            });
-          }
-        }
-      }
-    } catch (e) {
-      results.push({ method: "GET_deliveries", status: e.response?.status, success: false });
-    }
+    const { delivery_id: g2gDeliveryId } = await g2gClient.getDeliveries(orderId);
+    const deliveryId = g2gDeliveryId || smmOrder.g2g_delivery_id;
 
-    if (smmOrder.g2g_delivery_id) {
-      try {
-        const p = `/v2/orders/${orderId}/delivery/${smmOrder.g2g_delivery_id}`;
-        const r = await axios.patch(BASE + p, { status: "delivered" }, { headers: buildHeaders(p) });
-        results.push({
-          method: "PATCH_manual_delivery_id",
-          delivery_id: smmOrder.g2g_delivery_id,
-          status: r.status,
-          success: true,
-          data: r.data
-        });
-      } catch (e) {
-        results.push({
-          method: "PATCH_manual_delivery_id",
-          delivery_id: smmOrder.g2g_delivery_id,
-          status: e.response?.status,
-          success: false,
-          error: e.response?.data
-        });
-      }
+    if (!deliveryId) {
+      return res.status(400).json({
+        error: "Delivery ID not found. Please enter it manually in the G2G Delivery ID field.",
+        hint: "The delivery_id comes from G2G webhook. Check your webhook logs or G2G dashboard."
+      });
     }
 
     try {
-      const p = `/v2/orders/${orderId}/complete`;
-      const r = await axios.post(BASE + p, {}, { headers: buildHeaders(p) });
-      results.push({ method: "POST_complete", status: r.status, success: true, data: r.data });
-    } catch (e) {
-      results.push({ method: "POST_complete", status: e.response?.status, success: false, error: e.response?.data });
-    }
+      const patchResult = await g2gClient.patchDelivery(
+        orderId,
+        deliveryId,
+        smmOrder.quantity || 1
+      );
 
-    try {
-      const p = `/v2/orders/${orderId}/proof`;
-      const body = { proof: notes, proof_type: "text" };
-      const r = await axios.post(BASE + p, body, { headers: buildHeaders(p) });
-      results.push({ method: "POST_proof", status: r.status, success: true, data: r.data });
-    } catch (e) {
-      results.push({ method: "POST_proof", status: e.response?.status, success: false, error: e.response?.data });
-    }
-
-    try {
-      const p = `/v2/orders/${orderId}`;
-      const r = await axios.patch(BASE + p, { order_status: "delivered" }, { headers: buildHeaders(p) });
-      results.push({ method: "PATCH_order", status: r.status, success: true, data: r.data });
-    } catch (e) {
-      results.push({ method: "PATCH_order", status: e.response?.status, success: false, error: e.response?.data });
-    }
-
-    const success = results.some((r) => r.success && (r.status === 200 || r.status === 201));
-
-    if (success) {
       await db.query(
         `
           UPDATE smm_orders 
-          SET g2g_delivered=true, status='completed', updated_at=NOW() 
+          SET g2g_delivered=true, status='completed', updated_at=NOW()
           WHERE id=$1
         `,
         [req.params.id]
@@ -288,14 +198,50 @@ router.post("/api/orders/:id/deliver-g2g", async (req, res) => {
         `,
         [orderId]
       );
+
+      return res.json({
+        success: true,
+        method: "patchDelivery",
+        result: patchResult
+      });
+    } catch (error) {
+      console.log("[SMM] patchDelivery failed, trying deliverCode:", error.message);
     }
 
-    res.json({
-      success,
-      orderId,
-      message: success ? "G2G delivery successful!" : "All methods failed - check results",
-      results
-    });
+    try {
+      const codeResult = await g2gClient.deliverCode(orderId, deliveryId, [
+        smmOrder.notes || "Delivered"
+      ]);
+
+      await db.query(
+        `
+          UPDATE smm_orders 
+          SET g2g_delivered=true, status='completed', updated_at=NOW()
+          WHERE id=$1
+        `,
+        [req.params.id]
+      );
+
+      await db.query(
+        `
+          UPDATE orders 
+          SET status='delivered', delivered_qty=purchased_qty, updated_at=NOW() 
+          WHERE order_id=$1
+        `,
+        [orderId]
+      );
+
+      return res.json({
+        success: true,
+        method: "deliverCode",
+        result: codeResult
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
   } catch (err) {
     console.error("[SMM] deliver-g2g error:", err.message);
     res.status(500).json({ error: err.message });

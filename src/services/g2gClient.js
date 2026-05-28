@@ -9,15 +9,8 @@ function buildHeaders(urlPath) {
   const apiSecret = process.env.G2G_API_SECRET;
   const userId = process.env.G2G_USER_ID;
   const timestamp = Date.now().toString();
-
   const canonical = urlPath + apiKey + userId + timestamp;
-  const signature = crypto
-    .createHmac("sha256", apiSecret)
-    .update(canonical)
-    .digest("hex");
-
-  console.log("[G2G] canonical string:", canonical);
-  console.log("[G2G] signature:", signature.slice(0, 10) + "...");
+  const signature = crypto.createHmac("sha256", apiSecret).update(canonical).digest("hex");
 
   return {
     "g2g-api-key": apiKey,
@@ -29,46 +22,46 @@ function buildHeaders(urlPath) {
 }
 
 async function getOrderById(orderId) {
-  const endpoints = [
-    `/${API_VERSION}/order/${orderId}`,
-    `/${API_VERSION}/orders/${orderId}`
-  ];
+  const urlPath = `/${API_VERSION}/orders/${orderId}`;
 
-  for (const urlPath of endpoints) {
-    try {
-      const res = await axios.get(BASE_URL + urlPath, {
-        headers: buildHeaders(urlPath)
-      });
+  try {
+    const res = await axios.get(BASE_URL + urlPath, {
+      headers: buildHeaders(urlPath)
+    });
 
-      console.log("[G2G] getOrderById success at:", urlPath, res.status);
-      console.log("[G2G] FULL order response:", JSON.stringify(res.data));
-
-      return res.data?.payload;
-    } catch (err) {
-      console.error(
-        "[G2G] getOrderById failed at:",
-        urlPath,
-        err.response?.status,
-        JSON.stringify(err.response?.data)
-      );
-    }
+    return res.data?.payload;
+  } catch (err) {
+    console.error(
+      "[G2G] getOrderById error:",
+      err.response?.status,
+      JSON.stringify(err.response?.data)
+    );
+    throw new Error(
+      `getOrderById failed: ${err.response?.status} ${JSON.stringify(err.response?.data)}`
+    );
   }
-
-  throw new Error("Order not found on G2G - check order ID format");
 }
 
 async function getDeliveries(orderId) {
   const urlPath = `/${API_VERSION}/orders/${orderId}/deliveries`;
-  const url = BASE_URL + urlPath;
 
   try {
-    const res = await axios.get(url, {
+    const res = await axios.get(BASE_URL + urlPath, {
       headers: buildHeaders(urlPath)
     });
 
-    console.log("[G2G] getDeliveries full response:", JSON.stringify(res.data));
+    console.log("[G2G] getDeliveries:", JSON.stringify(res.data));
+    const list = res.data?.payload?.delivery_list || [];
 
-    return res.data?.payload;
+    return {
+      list,
+      delivery_list: list,
+      delivery_id:
+        list[0]?.delivery_summary?.delivery_id ||
+        list[0]?.delivery_id ||
+        list[0]?.id ||
+        null
+    };
   } catch (err) {
     console.error(
       "[G2G] getDeliveries error:",
@@ -76,79 +69,85 @@ async function getDeliveries(orderId) {
       JSON.stringify(err.response?.data)
     );
 
-    return null;
-  }
-}
-
-async function getStoreSettings() {
-  const urlPath = `/${API_VERSION}/store`;
-  const url = BASE_URL + urlPath;
-
-  try {
-    const res = await axios.get(url, {
-      headers: buildHeaders(urlPath)
-    });
-
-    console.log("[G2G] getStore response:", res.status);
-
-    return res.data?.payload;
-  } catch (err) {
-    console.error(
-      "[G2G] getStore error:",
-      err.response?.status,
-      JSON.stringify(err.response?.data)
-    );
-    throw new Error(
-      `getStore failed: ${err.response?.status} ${JSON.stringify(
-        err.response?.data
-      )}`
-    );
+    return {
+      list: [],
+      delivery_id: null
+    };
   }
 }
 
 async function deliverCode(orderId, deliveryId, codes) {
-  const urlPath = `/${API_VERSION}/order/${orderId}/delivery/${deliveryId}/code`;
+  const urlPath = `/${API_VERSION}/orders/${orderId}/delivery`;
   const body = {
-    code_list: codes.map((code) => ({
-      code
+    delivery_id: deliveryId,
+    codes: codes.map((code, index) => ({
+      content: code,
+      content_type: "text/plain",
+      reference_id: `ref_${index + 1}`
     }))
   };
+
+  console.log("[G2G] deliverCode:", urlPath, JSON.stringify(body));
 
   try {
     const res = await axios.post(BASE_URL + urlPath, body, {
       headers: buildHeaders(urlPath)
     });
 
+    console.log("[G2G] deliverCode response:", res.status, JSON.stringify(res.data));
     return res.data;
   } catch (err) {
-    console.error("[G2G] deliverCode error:", err.response?.data);
+    console.error(
+      "[G2G] deliverCode error:",
+      err.response?.status,
+      JSON.stringify(err.response?.data)
+    );
     throw new Error(
-      `deliverCode failed: ${err.response?.status} ${JSON.stringify(
-        err.response?.data
-      )}`
+      `deliverCode failed: ${err.response?.status} ${JSON.stringify(err.response?.data)}`
     );
   }
 }
 
-async function patchDelivery(orderId, deliveryId, status = "delivered") {
-  const urlPath = `/${API_VERSION}/order/${orderId}/delivery/${deliveryId}`;
+async function patchDelivery(orderId, deliveryId, deliveredQty = 1) {
+  const urlPath = `/${API_VERSION}/orders/${orderId}/delivery`;
+  const parsedDeliveredQty = Number.parseInt(deliveredQty, 10);
   const body = {
-    status
+    delivery_id: deliveryId,
+    delivered_qty: Number.isNaN(parsedDeliveredQty) ? 1 : parsedDeliveredQty
   };
+
+  console.log("[G2G] patchDelivery:", urlPath, JSON.stringify(body));
 
   try {
     const res = await axios.patch(BASE_URL + urlPath, body, {
       headers: buildHeaders(urlPath)
     });
 
+    console.log("[G2G] patchDelivery response:", res.status, JSON.stringify(res.data));
     return res.data;
   } catch (err) {
-    console.error("[G2G] patchDelivery error:", err.response?.data);
-    throw new Error(
-      `patchDelivery failed: ${err.response?.status} ${JSON.stringify(
-        err.response?.data
-      )}`
+    console.error(
+      "[G2G] patchDelivery error:",
+      err.response?.status,
+      JSON.stringify(err.response?.data)
     );
+    throw new Error(
+      `patchDelivery failed: ${err.response?.status} ${JSON.stringify(err.response?.data)}`
+    );
+  }
+}
+
+async function getStoreSettings() {
+  const urlPath = `/${API_VERSION}/store`;
+
+  try {
+    const res = await axios.get(BASE_URL + urlPath, {
+      headers: buildHeaders(urlPath)
+    });
+
+    return res.data?.payload;
+  } catch (err) {
+    throw new Error(`getStore failed: ${err.response?.status}`);
   }
 }
 
@@ -157,7 +156,7 @@ async function postDelivery(orderId, codes, deliveryId = null) {
     throw new Error("postDelivery failed: deliveryId is required for G2G v2 delivery.");
   }
 
-  const codeValues = codes.map((item) => {
+  const values = codes.map((item) => {
     if (item && typeof item === "object") {
       return item.code || item.content || JSON.stringify(item);
     }
@@ -165,15 +164,15 @@ async function postDelivery(orderId, codes, deliveryId = null) {
     return String(item);
   });
 
-  return deliverCode(orderId, deliveryId, codeValues);
+  return deliverCode(orderId, deliveryId, values);
 }
 
 module.exports = {
   getOrderById,
   getDeliveries,
-  getStoreSettings,
   deliverCode,
   patchDelivery,
-  postDelivery,
-  buildHeaders
+  getStoreSettings,
+  buildHeaders,
+  postDelivery
 };
