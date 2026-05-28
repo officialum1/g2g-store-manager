@@ -4,7 +4,7 @@ const { query, withTransaction } = require("../db");
 const Order = require("../db/models/Order");
 const Delivery = require("../db/models/Delivery");
 const { enqueueDeliveryJob } = require("../jobs/deliveryQueue");
-const { getOrders, postDelivery } = require("../services/g2gClient");
+const g2gClient = require("../services/g2gClient");
 
 const dashboardApp = express();
 const dashboardDirectory = path.join(__dirname, "..", "dashboard");
@@ -266,6 +266,10 @@ function normalizeG2GOrderPayload(order) {
   };
 }
 
+function previewJson(value, maxLength = 500) {
+  return String(JSON.stringify(value) || "").slice(0, maxLength);
+}
+
 function registerParentRoutes(parentApp) {
   if (parentApp.locals.dashboardExtensionsRegistered) {
     return;
@@ -286,6 +290,44 @@ function registerParentRoutes(parentApp) {
     });
   });
 
+  parentApp.get("/api/debug", async (req, res) => {
+    let dbConnected = false;
+
+    try {
+      await query("SELECT 1");
+      dbConnected = true;
+    } catch (error) {
+      console.error("[DEBUG] DB check failed:", error.message);
+    }
+
+    return res.json({
+      g2g_api_key_set: Boolean(process.env.G2G_API_KEY),
+      g2g_secret_set: Boolean(process.env.G2G_API_SECRET),
+      webhook_secret_set: Boolean(process.env.G2G_WEBHOOK_SECRET),
+      smm_url_set: Boolean(process.env.SMM_PANEL_URL),
+      node_env: process.env.NODE_ENV || "development",
+      db_connected: dbConnected
+    });
+  });
+
+  parentApp.get("/api/g2g-test", async (req, res) => {
+    try {
+      const result = await g2gClient.getOrders();
+
+      return res.json({
+        success: true,
+        raw: result
+      });
+    } catch (err) {
+      console.error("[G2G TEST] Failed:", err.message, err.stack);
+
+      return res.status(500).json({
+        success: false,
+        error: err.message
+      });
+    }
+  });
+
   ordersApiRouter.get("/", async (req, res, next) => {
     try {
       const limit = Number.parseInt(req.query.limit || "200", 10);
@@ -301,8 +343,10 @@ function registerParentRoutes(parentApp) {
 
   ordersApiRouter.get("/sync", async (req, res, next) => {
     try {
-      const g2gResponse = await getOrders();
-      const g2gOrders = extractOrdersFromG2GPayload(g2gResponse);
+      console.log("[SYNC] Starting G2G order sync...");
+      const result = await g2gClient.getOrders();
+      console.log("[SYNC] Raw G2G response:", previewJson(result));
+      const g2gOrders = extractOrdersFromG2GPayload(result);
       let synced = 0;
 
       for (const g2gOrder of g2gOrders) {
@@ -336,10 +380,15 @@ function registerParentRoutes(parentApp) {
 
       return res.json({
         synced,
-        processed: g2gOrders.length
+        processed: g2gOrders.length,
+        raw: result
       });
-    } catch (error) {
-      return next(error);
+    } catch (err) {
+      console.error("[SYNC] Failed:", err.message, err.stack);
+      return res.status(500).json({
+        error: err.message,
+        hint: "Check Render logs for full details"
+      });
     }
   });
 
@@ -423,7 +472,7 @@ function registerParentRoutes(parentApp) {
           ? order.raw_payload
           : {};
 
-      await postDelivery(orderId, manualDeliveryPayload);
+      await g2gClient.postDelivery(orderId, manualDeliveryPayload);
 
       await Delivery.updateStatus(
         latestDelivery?.delivery_id || `manual-${orderId}`,

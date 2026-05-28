@@ -1,53 +1,50 @@
 const axios = require("axios");
 const crypto = require("crypto");
-const { config } = require("../config");
 
-const httpClient = axios.create({
-  baseURL: config.g2g.baseUrl,
-  timeout: 30_000
-});
+const BASE_URL = "https://open-api.g2g.com/v1";
 
-function sortObject(value) {
-  if (Array.isArray(value)) {
-    return value.map(sortObject);
-  }
-
-  if (value && typeof value === "object") {
-    return Object.keys(value)
-      .sort()
-      .reduce((accumulator, key) => {
-        accumulator[key] = sortObject(value[key]);
-        return accumulator;
-      }, {});
-  }
-
-  return value;
+function previewJson(value, maxLength = 400) {
+  return String(JSON.stringify(value) || "").slice(0, maxLength);
 }
 
-function stableStringify(value) {
-  if (value === undefined || value === null) {
-    return "";
+function getBodyString(body = "") {
+  if (body && typeof body === "object" && Object.keys(body).length > 0) {
+    return JSON.stringify(body);
   }
 
-  return JSON.stringify(sortObject(value));
+  return "";
 }
 
-function createSignature(timestamp, body) {
-  const canonicalBody = stableStringify(body);
-  const message = `${config.g2g.apiKey}${timestamp}${canonicalBody}`;
+function generateSignature(timestamp, body = "") {
+  const bodyString = getBodyString(body);
+  const stringToSign = `${timestamp}:${bodyString}`;
+
+  console.log("[G2G] String to sign:", stringToSign);
 
   return crypto
-    .createHmac("sha256", config.g2g.apiSecret)
-    .update(message)
+    .createHmac("sha256", process.env.G2G_API_SECRET)
+    .update(stringToSign)
     .digest("hex");
 }
 
-function buildHeaders(timestamp, body) {
+function getHeaders(body = "") {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const signature = generateSignature(timestamp, body);
+
   return {
-    "Content-Type": "application/json",
-    "g2g-api-key": config.g2g.apiKey,
-    "g2g-signature": createSignature(timestamp, body),
-    "g2g-timestamp": timestamp
+    Authorization: `Bearer ${process.env.G2G_API_KEY}`,
+    "X-G2G-Signature": signature,
+    "X-G2G-Timestamp": timestamp,
+    "Content-Type": "application/json"
+  };
+}
+
+function getSafeHeadersForLog(headers) {
+  return {
+    ...headers,
+    Authorization: headers.Authorization
+      ? `${headers.Authorization.slice(0, 20)}...`
+      : ""
   };
 }
 
@@ -57,39 +54,58 @@ function sleep(milliseconds) {
   });
 }
 
-function formatAxiosError(error, action) {
-  if (error.response) {
-    const responseMessage =
-      error.response.data?.message ||
-      error.response.data?.error ||
-      JSON.stringify(error.response.data);
+function buildApiError(action, err) {
+  const status = err.response?.status;
+  const responseData = err.response?.data;
 
-    return `${action} failed with status ${error.response.status}: ${responseMessage}`;
+  if (status === 401) {
+    return new Error("G2G_AUTH_FAILED: Check API Key and Secret");
   }
 
-  if (error.request) {
-    return `${action} failed: no response received from G2G API.`;
+  if (status === 403) {
+    return new Error("G2G_FORBIDDEN: API Key may not have permission");
   }
 
-  return `${action} failed: ${error.message}`;
+  if (status === 404) {
+    return new Error("G2G_NOT_FOUND: Check API endpoint URL");
+  }
+
+  if (status) {
+    return new Error(`${action} failed: ${status} ${JSON.stringify(responseData)}`);
+  }
+
+  if (err.request) {
+    return new Error(`${action} failed: no response received from G2G API`);
+  }
+
+  return new Error(`${action} failed: ${err.message}`);
 }
 
-async function requestWithRetry(requestConfig, action, retryCount = 0) {
-  const timestamp = Date.now().toString();
-  const headers = buildHeaders(timestamp, requestConfig.data);
+async function requestWithRetry(config, action, retryCount = 0) {
+  const method = String(config.method || "GET").toUpperCase();
+  const url = config.url;
+  const body = config.data || "";
+  const headers = getHeaders(body);
+
+  console.log("[G2G] Calling:", method, url);
+  console.log("[G2G] Headers:", JSON.stringify(getSafeHeadersForLog(headers)));
 
   try {
-    const response = await httpClient.request({
-      ...requestConfig,
+    const res = await axios.request({
+      ...config,
       headers: {
         ...headers,
-        ...(requestConfig.headers || {})
+        ...(config.headers || {})
       }
     });
 
-    return response.data;
-  } catch (error) {
-    if (error.response?.status === 429 && retryCount < 3) {
+    console.log("[G2G] Response:", res.status, previewJson(res.data, 300));
+
+    return res.data;
+  } catch (err) {
+    console.error("[G2G] Error:", err.response?.status, err.response?.data);
+
+    if (err.response?.status === 429 && retryCount < 3) {
       const delayMs = 1_000 * 2 ** retryCount;
       console.warn(
         `G2G rate limit hit during ${action}. Retrying in ${delayMs}ms (attempt ${
@@ -97,25 +113,37 @@ async function requestWithRetry(requestConfig, action, retryCount = 0) {
         }/3).`
       );
       await sleep(delayMs);
-      return requestWithRetry(requestConfig, action, retryCount + 1);
+      return requestWithRetry(config, action, retryCount + 1);
     }
 
-    throw new Error(formatAxiosError(error, action));
+    throw buildApiError(action, err);
   }
 }
 
-async function getOrders(filters = {}) {
+async function getOrders(status = "pending_delivery") {
+  const url = `${BASE_URL}/seller/orders`;
+  const headers = getHeaders();
+
+  console.log("[G2G] GET", url);
+  console.log("[G2G] Headers:", JSON.stringify(getSafeHeadersForLog(headers)));
+
   try {
-    return await requestWithRetry(
-      {
-        method: "GET",
-        url: "/orders",
-        params: filters
-      },
-      "Fetching orders"
+    const res = await axios.get(url, {
+      headers,
+      params: {
+        status
+      }
+    });
+
+    console.log("[G2G] Response status:", res.status);
+    console.log("[G2G] Response data:", previewJson(res.data));
+
+    return res.data;
+  } catch (err) {
+    console.error("[G2G] 403 detail:", err.response?.data);
+    throw new Error(
+      `getOrders failed: ${err.response?.status} ${JSON.stringify(err.response?.data)}`
     );
-  } catch (error) {
-    throw new Error(`getOrders failed: ${error.message}`);
   }
 }
 
@@ -124,12 +152,12 @@ async function getOrder(orderId) {
     return await requestWithRetry(
       {
         method: "GET",
-        url: `/orders/${orderId}`
+        url: `${BASE_URL}/seller/orders/${encodeURIComponent(orderId)}`
       },
       `Fetching order ${orderId}`
     );
-  } catch (error) {
-    throw new Error(`getOrder failed for ${orderId}: ${error.message}`);
+  } catch (err) {
+    throw new Error(`getOrder failed for ${orderId}: ${err.message}`);
   }
 }
 
@@ -146,13 +174,13 @@ async function postDelivery(orderId, codes, deliveryId = null) {
     return await requestWithRetry(
       {
         method: "POST",
-        url: `/orders/${orderId}/delivery`,
+        url: `${BASE_URL}/seller/orders/${encodeURIComponent(orderId)}/delivery`,
         data: payload
       },
       `Posting delivery for order ${orderId}`
     );
-  } catch (error) {
-    throw new Error(`postDelivery failed for ${orderId}: ${error.message}`);
+  } catch (err) {
+    throw new Error(`postDelivery failed for ${orderId}: ${err.message}`);
   }
 }
 
@@ -161,13 +189,13 @@ async function getDeliveries(orderId, filters = {}) {
     return await requestWithRetry(
       {
         method: "GET",
-        url: `/orders/${orderId}/deliveries`,
+        url: `${BASE_URL}/seller/orders/${encodeURIComponent(orderId)}/deliveries`,
         params: filters
       },
       `Fetching deliveries for order ${orderId}`
     );
-  } catch (error) {
-    throw new Error(`getDeliveries failed for ${orderId}: ${error.message}`);
+  } catch (err) {
+    throw new Error(`getDeliveries failed for ${orderId}: ${err.message}`);
   }
 }
 
@@ -176,13 +204,13 @@ async function updateOffer(offerId, data) {
     return await requestWithRetry(
       {
         method: "PUT",
-        url: `/offers/${offerId}`,
+        url: `${BASE_URL}/seller/offers/${encodeURIComponent(offerId)}`,
         data
       },
       `Updating offer ${offerId}`
     );
-  } catch (error) {
-    throw new Error(`updateOffer failed for ${offerId}: ${error.message}`);
+  } catch (err) {
+    throw new Error(`updateOffer failed for ${offerId}: ${err.message}`);
   }
 }
 
@@ -191,12 +219,12 @@ async function getStore() {
     return await requestWithRetry(
       {
         method: "GET",
-        url: "/store"
+        url: `${BASE_URL}/seller/store`
       },
       "Fetching store information"
     );
-  } catch (error) {
-    throw new Error(`getStore failed: ${error.message}`);
+  } catch (err) {
+    throw new Error(`getStore failed: ${err.message}`);
   }
 }
 

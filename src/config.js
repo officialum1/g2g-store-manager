@@ -5,12 +5,7 @@ dotenv.config();
 const requiredKeys = [
   "G2G_API_KEY",
   "G2G_API_SECRET",
-  "G2G_WEBHOOK_SECRET",
-  "DATABASE_URL",
-  "REDIS_URL",
-  "SMM_PANEL_URL",
-  "SMM_PANEL_KEY",
-  "PORT"
+  "G2G_WEBHOOK_SECRET"
 ];
 
 const config = {
@@ -35,6 +30,11 @@ const config = {
 };
 
 function validateConfig() {
+  console.log("[CONFIG] Loaded:", {
+    hasG2GKey: Boolean(process.env.G2G_API_KEY),
+    hasSMM: Boolean(process.env.SMM_PANEL_URL)
+  });
+
   const missingKeys = requiredKeys.filter((key) => {
     return !process.env[key] || String(process.env[key]).trim() === "";
   });
