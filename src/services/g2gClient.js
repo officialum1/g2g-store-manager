@@ -1,8 +1,8 @@
-const crypto = require('crypto');
-const axios = require('axios');
+const crypto = require("crypto");
+const axios = require("axios");
 
-const BASE_URL = 'https://open-api.g2g.com';
-const API_VERSION = 'v2';
+const BASE_URL = "https://open-api.g2g.com";
+const API_VERSION = "v2";
 
 function buildHeaders(urlPath) {
   const apiKey = process.env.G2G_API_KEY;
@@ -12,59 +12,143 @@ function buildHeaders(urlPath) {
 
   const canonical = urlPath + apiKey + userId + timestamp;
   const signature = crypto
-    .createHmac('sha256', apiSecret)
+    .createHmac("sha256", apiSecret)
     .update(canonical)
-    .digest('hex');
+    .digest("hex");
 
-  console.log('[G2G] canonical string:', canonical);
-  console.log('[G2G] signature:', signature.slice(0, 10) + '...');
+  console.log("[G2G] canonical string:", canonical);
+  console.log("[G2G] signature:", signature.slice(0, 10) + "...");
 
   return {
-    'g2g-api-key': apiKey,
-    'g2g-userid': userId,
-    'g2g-signature': signature,
-    'g2g-timestamp': timestamp,
-    'Content-Type': 'application/json'
+    "g2g-api-key": apiKey,
+    "g2g-userid": userId,
+    "g2g-signature": signature,
+    "g2g-timestamp": timestamp,
+    "Content-Type": "application/json"
   };
 }
 
 async function getOrderById(orderId) {
-  const urlPath = `/${API_VERSION}/order/${orderId}`;
-  const url = BASE_URL + urlPath;
-  try {
-    const res = await axios.get(url, { headers: buildHeaders(urlPath) });
-    console.log('[G2G] getOrderById response:', res.status, JSON.stringify(res.data).slice(0, 300));
-    return res.data?.payload;
-  } catch (err) {
-    console.error('[G2G] getOrderById error:', err.response?.status, JSON.stringify(err.response?.data));
-    throw new Error(`getOrderById failed: ${err.response?.status} ${JSON.stringify(err.response?.data)}`);
+  const endpoints = [
+    `/${API_VERSION}/order/${orderId}`,
+    `/${API_VERSION}/orders/${orderId}`
+  ];
+
+  for (const urlPath of endpoints) {
+    try {
+      const res = await axios.get(BASE_URL + urlPath, {
+        headers: buildHeaders(urlPath)
+      });
+
+      console.log("[G2G] getOrderById success at:", urlPath, res.status);
+
+      return res.data?.payload;
+    } catch (err) {
+      console.error(
+        "[G2G] getOrderById failed at:",
+        urlPath,
+        err.response?.status,
+        JSON.stringify(err.response?.data)
+      );
+    }
   }
+
+  throw new Error("Order not found on G2G - check order ID format");
 }
 
 async function getStoreSettings() {
   const urlPath = `/${API_VERSION}/store`;
   const url = BASE_URL + urlPath;
+
   try {
-    const res = await axios.get(url, { headers: buildHeaders(urlPath) });
-    console.log('[G2G] getStore response:', res.status);
+    const res = await axios.get(url, {
+      headers: buildHeaders(urlPath)
+    });
+
+    console.log("[G2G] getStore response:", res.status);
+
     return res.data?.payload;
   } catch (err) {
-    console.error('[G2G] getStore error:', err.response?.status, JSON.stringify(err.response?.data));
-    throw new Error(`getStore failed: ${err.response?.status} ${JSON.stringify(err.response?.data)}`);
+    console.error(
+      "[G2G] getStore error:",
+      err.response?.status,
+      JSON.stringify(err.response?.data)
+    );
+    throw new Error(
+      `getStore failed: ${err.response?.status} ${JSON.stringify(
+        err.response?.data
+      )}`
+    );
   }
 }
 
 async function deliverCode(orderId, deliveryId, codes) {
   const urlPath = `/${API_VERSION}/order/${orderId}/delivery/${deliveryId}/code`;
-  const url = BASE_URL + urlPath;
-  const body = { code_list: codes.map(c => ({ code: c })) };
+  const body = {
+    code_list: codes.map((code) => ({
+      code
+    }))
+  };
+
   try {
-    const res = await axios.post(url, body, { headers: buildHeaders(urlPath) });
+    const res = await axios.post(BASE_URL + urlPath, body, {
+      headers: buildHeaders(urlPath)
+    });
+
     return res.data;
   } catch (err) {
-    console.error('[G2G] deliverCode error:', err.response?.data);
-    throw new Error(`deliverCode failed: ${err.response?.status} ${JSON.stringify(err.response?.data)}`);
+    console.error("[G2G] deliverCode error:", err.response?.data);
+    throw new Error(
+      `deliverCode failed: ${err.response?.status} ${JSON.stringify(
+        err.response?.data
+      )}`
+    );
   }
 }
 
-module.exports = { getOrderById, getStoreSettings, deliverCode, buildHeaders };
+async function patchDelivery(orderId, deliveryId, status = "delivered") {
+  const urlPath = `/${API_VERSION}/order/${orderId}/delivery/${deliveryId}`;
+  const body = {
+    status
+  };
+
+  try {
+    const res = await axios.patch(BASE_URL + urlPath, body, {
+      headers: buildHeaders(urlPath)
+    });
+
+    return res.data;
+  } catch (err) {
+    console.error("[G2G] patchDelivery error:", err.response?.data);
+    throw new Error(
+      `patchDelivery failed: ${err.response?.status} ${JSON.stringify(
+        err.response?.data
+      )}`
+    );
+  }
+}
+
+async function postDelivery(orderId, codes, deliveryId = null) {
+  if (!deliveryId) {
+    throw new Error("postDelivery failed: deliveryId is required for G2G v2 delivery.");
+  }
+
+  const codeValues = codes.map((item) => {
+    if (item && typeof item === "object") {
+      return item.code || item.content || JSON.stringify(item);
+    }
+
+    return String(item);
+  });
+
+  return deliverCode(orderId, deliveryId, codeValues);
+}
+
+module.exports = {
+  getOrderById,
+  getStoreSettings,
+  deliverCode,
+  patchDelivery,
+  postDelivery,
+  buildHeaders
+};

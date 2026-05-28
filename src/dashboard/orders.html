@@ -35,6 +35,11 @@
         color: #fb923c;
       }
 
+      .status-badge.delivered {
+        background: rgba(34, 197, 94, 0.18);
+        color: #4ade80;
+      }
+
       .info-banner {
         display: flex;
         align-items: center;
@@ -290,6 +295,24 @@
           <button id="close-order-details-button" class="button-secondary">Close</button>
         </div>
         <pre id="order-details-json" class="details-json">{}</pre>
+      </div>
+    </div>
+
+    <div id="deliveryModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000;">
+      <div style="background:#1a1a1a; border-radius:12px; padding:32px; max-width:600px; margin:80px auto; position:relative;">
+        <h2 id="modalOrderId">Deliver Order</h2>
+        <div id="modalBuyerInfo"></div>
+        <div id="modalAdditionalInfo"></div>
+        <select id="deliveryType" style="width:100%; padding:10px; margin:16px 0; background:#0f0f0f; color:#fff; border:1px solid #333; border-radius:6px;">
+          <option value="code">Send Code / Account Credentials</option>
+          <option value="boost">Mark Boost / Service Complete</option>
+        </select>
+        <textarea id="deliveryCodes" placeholder="Enter account credentials (one per line)&#10;Example: username:password" 
+          style="width:100%; height:120px; padding:10px; background:#0f0f0f; color:#fff; border:1px solid #333; border-radius:6px; font-family:monospace;"></textarea>
+        <div style="margin-top:16px; display:flex; gap:12px;">
+          <button onclick="confirmDelivery()" style="background:#6c63ff; color:#fff; border:none; padding:12px 24px; border-radius:6px; cursor:pointer; flex:1;">Confirm Delivery</button>
+          <button onclick="closeModal()" style="background:#333; color:#fff; border:none; padding:12px 24px; border-radius:6px; cursor:pointer;">Cancel</button>
+        </div>
       </div>
     </div>
 

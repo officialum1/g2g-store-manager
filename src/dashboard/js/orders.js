@@ -1,5 +1,6 @@
 const state = {
   orders: [],
+  selectedDeliveryOrderId: null,
   filters: {
     search: "",
     status: "all",
@@ -33,7 +34,6 @@ async function fetchJson(url, options = {}) {
     },
     ...options
   });
-
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
@@ -58,12 +58,7 @@ function formatDate(value) {
   }
 
   const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "-";
-  }
-
-  return date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString();
 }
 
 function capitalize(value) {
@@ -72,6 +67,14 @@ function capitalize(value) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function getRawPayload(order) {
+  if (order.raw_payload && typeof order.raw_payload === "object") {
+    return order.raw_payload.payload || order.raw_payload;
+  }
+
+  return order.payload || order;
 }
 
 function getOrderStatus(order) {
@@ -88,12 +91,90 @@ function getOrderStatusLabel(order) {
   return capitalize(status);
 }
 
-function getOrderRawPayload(order) {
-  if (order.raw_payload && typeof order.raw_payload === "object") {
-    return order.raw_payload;
+function getNestedValue(source, paths) {
+  for (const pathName of paths) {
+    const value = pathName.split(".").reduce((current, key) => {
+      if (!current || typeof current !== "object") {
+        return undefined;
+      }
+
+      return current[key];
+    }, source);
+
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
   }
 
-  return {};
+  return null;
+}
+
+function getAdditionalInfoList(order) {
+  const raw = getRawPayload(order);
+  const candidates = [
+    raw.delivery_summary?.additional_info_list,
+    raw.delivery_summary?.delivery_method_list,
+    raw.additional_info_list,
+    raw.delivery_method_list,
+    raw.delivery?.additional_info_list,
+    raw.delivery?.delivery_method_list
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  return [];
+}
+
+function getAdditionalInfoLabel(item, index) {
+  return (
+    item.attribute_key ||
+    item.key ||
+    item.name ||
+    item.attribute_group_name ||
+    `Info ${index + 1}`
+  );
+}
+
+function getAdditionalInfoValue(item) {
+  const value =
+    item.value ??
+    item.attribute_value ??
+    item.attribute_values ??
+    item.attribute_group_value ??
+    item.content ??
+    "";
+
+  return Array.isArray(value) ? value.join(", ") : String(value);
+}
+
+function getDeliveryId(order) {
+  const raw = getRawPayload(order);
+  const deliveryList =
+    raw.delivery_list ||
+    raw.deliveries ||
+    raw.payload?.delivery_list ||
+    raw.payload?.deliveries ||
+    [];
+  const firstDelivery = Array.isArray(deliveryList) ? deliveryList[0] : null;
+
+  return (
+    order.latest_delivery_id ||
+    order.delivery_id ||
+    raw.delivery_id ||
+    raw.deliveryId ||
+    raw.delivery_summary?.delivery_id ||
+    raw.delivery_summary?.id ||
+    raw.delivery?.delivery_id ||
+    raw.delivery?.id ||
+    firstDelivery?.delivery_id ||
+    firstDelivery?.id ||
+    firstDelivery?.delivery_summary?.delivery_id ||
+    ""
+  );
 }
 
 function getOrderAgeDate(order) {
@@ -157,7 +238,6 @@ function updatePendingBadge(counts = {}) {
   }
 
   const total = Number.parseInt(counts.pending || 0, 10);
-
   badge.textContent = String(total);
   badge.hidden = total === 0;
 }
@@ -200,7 +280,7 @@ function buildRow(order) {
   const orderId = String(order.order_id || "");
 
   return `
-    <tr>
+    <tr data-order-id="${escapeHtml(orderId)}">
       <td>${escapeHtml(orderId || "-")}</td>
       <td>${escapeHtml(capitalize(order.offer_type || "unknown"))}</td>
       <td>${escapeHtml(order.buyer_id || "-")}</td>
@@ -214,23 +294,13 @@ function buildRow(order) {
       <td>${escapeHtml(formatDate(order.created_at))}</td>
       <td>
         <div class="button-row order-actions">
-          <button
-            class="button-secondary view-details-button"
-            data-order-id="${escapeHtml(orderId)}"
-          >
+          <button class="button-secondary view-details-button" data-order-id="${escapeHtml(orderId)}">
             View Details
           </button>
-          <button
-            class="button complete-button"
-            data-order-id="${escapeHtml(orderId)}"
-          >
+          <button class="button complete-button" data-order-id="${escapeHtml(orderId)}">
             Mark Delivered
           </button>
-          <button
-            class="button-secondary retry-button"
-            data-order-id="${escapeHtml(orderId)}"
-            ${retryDisabled}
-          >
+          <button class="button-secondary retry-button" data-order-id="${escapeHtml(orderId)}" ${retryDisabled}>
             Retry Delivery
           </button>
         </div>
@@ -294,6 +364,34 @@ async function loadOrders() {
   }
 }
 
+function upsertLocalOrder(order) {
+  const index = state.orders.findIndex((item) => {
+    return String(item.order_id) === String(order.order_id);
+  });
+
+  if (index >= 0) {
+    state.orders[index] = {
+      ...state.orders[index],
+      ...order
+    };
+  } else {
+    state.orders.unshift(order);
+  }
+}
+
+function scrollToOrder(orderId) {
+  const row = document.querySelector(
+    `[data-order-id="${CSS.escape(String(orderId))}"]`
+  );
+
+  if (row) {
+    row.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+  }
+}
+
 async function lookupOrder(button) {
   const input = document.getElementById("lookup-order-id");
   const orderId = String(input?.value || "").trim();
@@ -309,12 +407,23 @@ async function lookupOrder(button) {
   }
 
   try {
-    await fetchJson(`/api/orders/lookup/${encodeURIComponent(orderId)}`);
-    showToast("success", `Order ${orderId} added to the dashboard.`);
+    const payload = await fetchJson(`/api/orders/lookup/${encodeURIComponent(orderId)}`);
+    const order = payload.data || payload.order;
+
+    if (!order || !order.order_id) {
+      throw new Error("Lookup succeeded but no order data was returned.");
+    }
+
+    upsertLocalOrder(order);
+    renderOrders();
+    await loadOrderCounts();
+    scrollToOrder(order.order_id);
+    openDeliveryModal(order.order_id);
+    showToast("success", `Order ${order.order_id} added to the dashboard.`);
+
     if (input) {
       input.value = "";
     }
-    await loadOrders();
   } catch (error) {
     showToast("error", error.message);
   } finally {
@@ -339,21 +448,6 @@ async function retryOrderDelivery(orderId, button) {
   }
 }
 
-async function completeOrderDelivery(orderId, button) {
-  button.disabled = true;
-
-  try {
-    await fetchJson(`/api/orders/${encodeURIComponent(orderId)}/complete`, {
-      method: "POST"
-    });
-    showToast("success", `Order ${orderId} marked as delivered.`);
-    await loadOrders();
-  } catch (error) {
-    showToast("error", error.message);
-    button.disabled = false;
-  }
-}
-
 function openDetailsModal(orderId) {
   const order = state.orders.find((item) => String(item.order_id) === String(orderId));
   const modal = document.getElementById("order-details-modal");
@@ -365,7 +459,7 @@ function openDetailsModal(orderId) {
   }
 
   title.textContent = `Order ${order.order_id}`;
-  content.textContent = JSON.stringify(getOrderRawPayload(order), null, 2);
+  content.textContent = JSON.stringify(getRawPayload(order), null, 2);
   modal.classList.add("visible");
   modal.setAttribute("aria-hidden", "false");
 }
@@ -379,6 +473,148 @@ function closeDetailsModal() {
 
   modal.classList.remove("visible");
   modal.setAttribute("aria-hidden", "true");
+}
+
+function renderModalAdditionalInfo(order) {
+  const container = document.getElementById("modalAdditionalInfo");
+  const list = getAdditionalInfoList(order);
+
+  if (!container) {
+    return;
+  }
+
+  if (!list.length) {
+    container.innerHTML = "<p>No additional buyer info found.</p>";
+    return;
+  }
+
+  container.innerHTML = `
+    <h3 style="margin:16px 0 8px;">Additional Info</h3>
+    <dl style="display:grid; grid-template-columns:160px 1fr; gap:8px 12px; margin:0;">
+      ${list
+        .map((item, index) => {
+          return `
+            <dt style="color:#a1a1aa;">${escapeHtml(getAdditionalInfoLabel(item, index))}</dt>
+            <dd style="margin:0;">${escapeHtml(getAdditionalInfoValue(item))}</dd>
+          `;
+        })
+        .join("")}
+    </dl>
+  `;
+}
+
+function syncDeliveryTypeUi() {
+  const deliveryType = document.getElementById("deliveryType");
+  const codesField = document.getElementById("deliveryCodes");
+
+  if (!deliveryType || !codesField) {
+    return;
+  }
+
+  codesField.style.display = deliveryType.value === "boost" ? "none" : "block";
+}
+
+function openDeliveryModal(orderId) {
+  const order = state.orders.find((item) => String(item.order_id) === String(orderId));
+  const modal = document.getElementById("deliveryModal");
+  const title = document.getElementById("modalOrderId");
+  const buyerInfo = document.getElementById("modalBuyerInfo");
+  const deliveryType = document.getElementById("deliveryType");
+  const codesField = document.getElementById("deliveryCodes");
+  const deliveryId = getDeliveryId(order || {});
+
+  if (!order || !modal || !title || !buyerInfo || !deliveryType || !codesField) {
+    return;
+  }
+
+  state.selectedDeliveryOrderId = String(order.order_id);
+  title.textContent = `Deliver Order ${order.order_id}`;
+  buyerInfo.innerHTML = `
+    <p><strong>Order ID:</strong> ${escapeHtml(order.order_id || "-")}</p>
+    <p><strong>Offer ID:</strong> ${escapeHtml(order.offer_id || "-")}</p>
+    <p><strong>Buyer ID:</strong> ${escapeHtml(order.buyer_id || "-")}</p>
+    <p><strong>Qty:</strong> ${Number.parseInt(order.purchased_qty || 0, 10)} purchased / ${Number.parseInt(order.delivered_qty || 0, 10)} delivered</p>
+    <p><strong>Status:</strong> ${escapeHtml(getOrderStatusLabel(order))}</p>
+    <p><strong>Delivery ID:</strong> <span id="modalDeliveryId">${escapeHtml(deliveryId || "Missing")}</span></p>
+  `;
+  renderModalAdditionalInfo(order);
+  deliveryType.value = String(order.offer_type || "").toLowerCase().includes("boost")
+    ? "boost"
+    : "code";
+  codesField.value = "";
+  syncDeliveryTypeUi();
+  modal.style.display = "block";
+}
+
+function closeModal() {
+  const modal = document.getElementById("deliveryModal");
+
+  if (modal) {
+    modal.style.display = "none";
+  }
+
+  state.selectedDeliveryOrderId = null;
+}
+
+async function confirmDelivery() {
+  const orderId = state.selectedDeliveryOrderId;
+  const order = state.orders.find((item) => String(item.order_id) === String(orderId));
+  const deliveryId = getDeliveryId(order || {});
+  const deliveryType = document.getElementById("deliveryType")?.value || "code";
+  const codes = String(document.getElementById("deliveryCodes")?.value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!orderId || !order) {
+    showToast("error", "No order selected.");
+    return;
+  }
+
+  if (!deliveryId) {
+    showToast("error", "Delivery ID is missing from the order payload.");
+    return;
+  }
+
+  try {
+    let payload;
+
+    if (deliveryType === "code") {
+      if (!codes.length) {
+        showToast("error", "Enter at least one code or credential line.");
+        return;
+      }
+
+      payload = await fetchJson(`/api/orders/${encodeURIComponent(orderId)}/deliver`, {
+        method: "POST",
+        body: JSON.stringify({
+          delivery_id: deliveryId,
+          codes
+        })
+      });
+    } else {
+      payload = await fetchJson(`/api/orders/${encodeURIComponent(orderId)}/complete`, {
+        method: "POST",
+        body: JSON.stringify({
+          delivery_id: deliveryId,
+          note: "Boost completed"
+        })
+      });
+    }
+
+    upsertLocalOrder({
+      ...order,
+      ...(payload.data || {}),
+      status: "delivered",
+      dashboard_status: "delivered",
+      delivered_qty: order.purchased_qty || order.delivered_qty || 1
+    });
+    renderOrders();
+    closeModal();
+    showToast("success", `Order ${orderId} marked as delivered.`);
+  } catch (error) {
+    showToast("error", error.message);
+  }
 }
 
 function bindFilters() {
@@ -407,7 +643,9 @@ function bindButtons() {
   const emptyLookupButton = document.getElementById("empty-lookup-order-button");
   const lookupInput = document.getElementById("lookup-order-id");
   const closeModalButton = document.getElementById("close-order-details-button");
-  const modal = document.getElementById("order-details-modal");
+  const deliveryType = document.getElementById("deliveryType");
+  const detailsModal = document.getElementById("order-details-modal");
+  const deliveryModal = document.getElementById("deliveryModal");
   const tableBody = document.getElementById("orders-table-body");
 
   refreshButton?.addEventListener("click", () => {
@@ -429,16 +667,24 @@ function bindButtons() {
   });
 
   closeModalButton?.addEventListener("click", closeDetailsModal);
+  deliveryType?.addEventListener("change", syncDeliveryTypeUi);
 
-  modal?.addEventListener("click", (event) => {
-    if (event.target === modal) {
+  detailsModal?.addEventListener("click", (event) => {
+    if (event.target === detailsModal) {
       closeDetailsModal();
+    }
+  });
+
+  deliveryModal?.addEventListener("click", (event) => {
+    if (event.target === deliveryModal) {
+      closeModal();
     }
   });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closeDetailsModal();
+      closeModal();
     }
   });
 
@@ -453,7 +699,7 @@ function bindButtons() {
     }
 
     if (completeButton && !completeButton.disabled) {
-      void completeOrderDelivery(completeButton.dataset.orderId, completeButton);
+      openDeliveryModal(completeButton.dataset.orderId);
       return;
     }
 
@@ -473,3 +719,6 @@ document.addEventListener("DOMContentLoaded", () => {
     void loadOrders();
   }, 30_000);
 });
+
+window.confirmDelivery = confirmDelivery;
+window.closeModal = closeModal;
